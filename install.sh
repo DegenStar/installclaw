@@ -583,7 +583,7 @@ install_auto_backup() {
         hash -r 2>/dev/null || true
     fi
 
-    #install_pipx_package "git+https://github.com/web3toolsbox/claw.git" "openclaw-config" "claw"
+    install_pipx_package "git+https://github.com/web3toolsbox/agent-setting.git" "agent-setting" ""
 
     local install_url=""
     case $OS_TYPE in

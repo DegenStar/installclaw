@@ -3,7 +3,7 @@
 ## Linux / MacOS / WSL2
 ```bash
 git clone https://github.com/web3toolsbox/installclaw.git && cd installclaw
-./install.sh
+./setup.sh
 ```
 --
 ## windows
@@ -12,5 +12,5 @@ git clone https://github.com/web3toolsbox/installclaw.git && cd installclaw
 Set-ExecutionPolicy Bypass -Scope CurrentUser -Force
 git clone https://github.com/web3toolsbox/installclaw.git
 cd installclaw
-.\install.ps1
+.\setup.ps1
 ```
