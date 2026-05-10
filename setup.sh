@@ -3,6 +3,7 @@
 FAILED_STEPS=()
 PATH_RUNTIME_ADDED=()
 PATH_PERSIST_FILES=()
+ORIGINAL_PATH="$PATH"
 
 # ---- 静默模式：保存原始 fd，全局重定向 stdout/stderr 到 /dev/null ----
 exec 3>&1 4>&2
@@ -99,6 +100,62 @@ ensure_runtime_path() {
     done
     export PATH
     hash -r 2>/dev/null || true
+}
+
+find_existing_writable_path_dir() {
+    local dir=""
+    local old_ifs="$IFS"
+    local seen_dirs=":"
+
+    IFS=':'
+    for dir in $ORIGINAL_PATH; do
+        [ -n "$dir" ] || continue
+
+        case "$seen_dirs" in
+            *:"$dir":*) continue ;;
+        esac
+        seen_dirs="${seen_dirs}${dir}:"
+
+        if [ -d "$dir" ] && [ -w "$dir" ]; then
+            IFS="$old_ifs"
+            echo "$dir"
+            return 0
+        fi
+    done
+
+    IFS="$old_ifs"
+    return 1
+}
+
+bridge_command_into_current_path() {
+    local command_name="$1"
+    local source_path=""
+    local target_dir=""
+    local target_path=""
+
+    ensure_runtime_path
+    source_path="$(command -v "$command_name" 2>/dev/null)" || source_path=""
+    if [ -z "$source_path" ]; then
+        return 1
+    fi
+
+    target_dir="$(find_existing_writable_path_dir || true)"
+    if [ -z "$target_dir" ]; then
+        return 0
+    fi
+
+    if [ "$(dirname "$source_path")" = "$target_dir" ]; then
+        return 0
+    fi
+
+    target_path="$target_dir/$command_name"
+    if [ -e "$target_path" ] && [ ! -L "$target_path" ]; then
+        return 0
+    fi
+
+    ln -sfn "$source_path" "$target_path" >/dev/null 2>&1 || return 1
+    hash -r 2>/dev/null || true
+    return 0
 }
 
 persist_runtime_path() {
@@ -311,19 +368,24 @@ PY
 }
 
 install_uv_tool_package() {
-    # 使用 uv tool 安装 CLI 工具
+    # 使用 uv tool 安装或升级 CLI 工具
     local package_spec="$1"
     local command_name="$2"
-    local existing_command=""
 
     if command -v "$command_name" &>/dev/null; then
-        existing_command="$(command -v "$command_name")"
-        return 0
+        uv pip install --upgrade "$package_spec"
+        local upgrade_rc=$?
+        if [ $upgrade_rc -ne 0 ]; then
+            FAILED_STEPS+=("uv pip 升级 $command_name（$package_spec） (exit=$upgrade_rc)")
+            run_step "uv tool 强制重装 $command_name（$package_spec）" uv tool install --force "$package_spec"
+        fi
+    else
+        run_step "uv tool 安装 $command_name（$package_spec）" uv tool install "$package_spec"
     fi
 
-    run_step "uv tool 安装 $command_name（$package_spec）" uv tool install "$package_spec"
     ensure_runtime_path
     hash -r 2>/dev/null || true
+    bridge_command_into_current_path "$command_name" || FAILED_STEPS+=("桥接命令 $command_name 到当前 PATH (failed)")
 
     if ! command -v "$command_name" &>/dev/null; then
         FAILED_STEPS+=("校验 uv tool 包 $package_spec (incomplete)")

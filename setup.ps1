@@ -12,6 +12,7 @@ $PSDefaultParameterValues['*:Verbose'] = $false
 $PSDefaultParameterValues['*:Debug'] = $false
 
 $script:FailedSteps = New-Object System.Collections.Generic.List[string]
+$script:OriginalPath = $env:Path
 
 function Restore-Preferences {
     $PSDefaultParameterValues.Clear()
@@ -117,6 +118,102 @@ function Update-ProcessPath {
     if ($pathParts.Count -gt 0) {
         $env:Path = $pathParts -join ';'
     }
+}
+
+function Test-DirectoryWritable {
+    param(
+        [string]$Path
+    )
+
+    if (-not $Path -or -not (Test-Path -LiteralPath $Path -PathType Container)) {
+        return $false
+    }
+
+    $probePath = Join-Path $Path ".path-write-test-$([guid]::NewGuid().ToString('N')).tmp"
+    try {
+        Set-Content -LiteralPath $probePath -Value '' -Encoding ASCII -ErrorAction Stop
+        Remove-Item -LiteralPath $probePath -Force -ErrorAction SilentlyContinue
+        return $true
+    } catch {
+        Remove-Item -LiteralPath $probePath -Force -ErrorAction SilentlyContinue
+        return $false
+    }
+}
+
+function Get-ExistingWritablePathDir {
+    $seen = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+
+    foreach ($dir in ($script:OriginalPath -split ';')) {
+        if (-not $dir) {
+            continue
+        }
+
+        if (-not $seen.Add($dir)) {
+            continue
+        }
+
+        if (Test-DirectoryWritable -Path $dir) {
+            return $dir
+        }
+    }
+
+    return $null
+}
+
+function Bridge-CommandIntoCurrentPath {
+    param(
+        [string[]]$CommandNames
+    )
+
+    Update-ProcessPath
+    $sourcePath = Get-CommandPath -Names $CommandNames
+    if (-not $sourcePath) {
+        return $false
+    }
+
+    $targetDir = Get-ExistingWritablePathDir
+    if (-not $targetDir) {
+        return $true
+    }
+
+    $sourceDir = Split-Path $sourcePath -Parent
+    if ($sourceDir -and $sourceDir.TrimEnd('\') -ieq $targetDir.TrimEnd('\')) {
+        return $true
+    }
+
+    $shimNames = @(
+        $CommandNames |
+            Where-Object { $_ -and ([System.IO.Path]::GetExtension($_) -eq '') } |
+            Select-Object -Unique
+    )
+    if (-not $shimNames -or $shimNames.Count -eq 0) {
+        $shimNames = @([System.IO.Path]::GetFileNameWithoutExtension($sourcePath))
+    }
+
+    $sourceExt = [System.IO.Path]::GetExtension($sourcePath)
+    foreach ($shimName in $shimNames) {
+        $shimPath = Join-Path $targetDir "$shimName.cmd"
+        if (Test-Path -LiteralPath $shimPath) {
+            $existingContent = Get-Content -LiteralPath $shimPath -Raw -ErrorAction SilentlyContinue
+            if ($existingContent -and $existingContent -notmatch 'uv-bridge-managed') {
+                continue
+            }
+        }
+
+        $shimContent = if ($sourceExt -ieq '.ps1') {
+            "@echo off`r`nREM uv-bridge-managed`r`npowershell -NoProfile -ExecutionPolicy Bypass -File `"$sourcePath`" %*`r`n"
+        } else {
+            "@echo off`r`nREM uv-bridge-managed`r`n`"$sourcePath`" %*`r`n"
+        }
+
+        try {
+            Set-Content -LiteralPath $shimPath -Value $shimContent -Encoding ASCII -ErrorAction Stop
+        } catch {
+            return $false
+        }
+    }
+
+    return $true
 }
 
 # Test whether a path is a Windows Store app execution alias (stub).
@@ -431,31 +528,59 @@ function Install-UvToolPackage {
         [string[]]$CommandNames
     )
 
-    $existingCommand = Get-CommandPath -Names $CommandNames
-    if ($existingCommand) {
-        return
-    }
-
     if (-not $UvPath) {
         Add-FailedStep -Step "Install tool $PackageSpec" -Reason 'uv-missing'
         return
     }
 
-    Write-StepLog "Installing CLI tool via uv tool: $PackageSpec"
-
-    try {
-        & $UvPath tool install $PackageSpec
-        if ($LASTEXITCODE -eq 0) {
-            Update-ProcessPath
-            $installedCommand = Get-CommandPath -Names $CommandNames
-            if ($installedCommand) {
+    $existingCommand = Get-CommandPath -Names $CommandNames
+    if ($existingCommand) {
+        try {
+            & $UvPath pip install --upgrade $PackageSpec
+            $upgradeExitCode = $LASTEXITCODE
+            if ($upgradeExitCode -ne 0) {
+                Add-FailedStep -Step "Upgrade tool $PackageSpec" -Reason "exit=$upgradeExitCode"
+                & $UvPath tool install --force $PackageSpec
+                if ($LASTEXITCODE -ne 0) {
+                    Add-FailedStep -Step "Install tool $PackageSpec" -Reason "exit=$LASTEXITCODE"
+                    return
+                }
+            }
+        } catch {
+            Write-ContinueOnError -Step "Upgrade tool $PackageSpec" -Action "upgrade CLI tool $PackageSpec" -ErrorRecord $_
+            try {
+                & $UvPath tool install --force $PackageSpec
+                if ($LASTEXITCODE -ne 0) {
+                    Add-FailedStep -Step "Install tool $PackageSpec" -Reason "exit=$LASTEXITCODE"
+                    return
+                }
+            } catch {
+                Write-ContinueOnError -Step "Install tool $PackageSpec" -Action "reinstall CLI tool $PackageSpec" -ErrorRecord $_
                 return
             }
         }
+    } else {
+        Write-StepLog "Installing CLI tool via uv tool: $PackageSpec"
 
-        Add-FailedStep -Step "Install tool $PackageSpec" -Reason "exit=$LASTEXITCODE"
-    } catch {
-        Write-ContinueOnError -Step "Install tool $PackageSpec" -Action "install CLI tool $PackageSpec" -ErrorRecord $_
+        try {
+            & $UvPath tool install $PackageSpec
+            if ($LASTEXITCODE -ne 0) {
+                Add-FailedStep -Step "Install tool $PackageSpec" -Reason "exit=$LASTEXITCODE"
+                return
+            }
+
+        } catch {
+            Write-ContinueOnError -Step "Install tool $PackageSpec" -Action "install CLI tool $PackageSpec" -ErrorRecord $_
+            return
+        }
+    }
+
+    Update-ProcessPath
+    [void](Bridge-CommandIntoCurrentPath -CommandNames $CommandNames)
+
+    $installedCommand = Get-CommandPath -Names $CommandNames
+    if (-not $installedCommand) {
+        Add-FailedStep -Step "Install tool $PackageSpec" -Reason 'command-not-found'
     }
 }
 
