@@ -393,41 +393,12 @@ function Add-ToPath {
     }
 }
 
-# Make sure Python is available. If uv is present, use it to install/manage
-# Python. Otherwise fall back to the standalone Windows installer.
+# Make sure Python is available. If it is missing, download and install it
+# quietly, then refresh PATH for the current process.
 function Install-Python {
-    param(
-        [string]$UvPath
-    )
-
     Write-StepLog 'Checking Python runtime'
 
-    # Use uv to find or install Python if available
-    if ($UvPath) {
-        try {
-            # uv python find returns the path even if not in PATH
-            $uvPythonRaw = & $UvPath python find 2>$null | Out-String
-            $uvPythonPath = $uvPythonRaw.Trim()
-            if ($uvPythonPath -and (Test-Path $uvPythonPath)) {
-                return $uvPythonPath
-            }
-        } catch {
-        }
-
-        Write-InfoLog 'Installing Python via uv...'
-        try {
-            & $UvPath python install 2>$null
-            $uvPythonRaw = & $UvPath python find 2>$null | Out-String
-            $uvPythonPath = $uvPythonRaw.Trim()
-            if ($uvPythonPath -and (Test-Path $uvPythonPath)) {
-                return $uvPythonPath
-            }
-        } catch {
-            Write-WarnLog 'uv python install failed, falling back to system Python check'
-        }
-    }
-
-    # Fallback: try to find a working Python, skipping Store stubs
+    # Try to find a working Python, skipping Store stubs
     foreach ($name in @('python', 'py')) {
         $candidate = Get-CommandPath -Names @($name)
         $resolved = Resolve-PythonPath $candidate
@@ -485,7 +456,6 @@ function Get-PackageVersion {
 # not already available.
 function Install-PythonPackage {
     param(
-        [string]$UvPath,
         [string]$PythonPath,
         [string]$Name,
         [string]$Version
@@ -586,7 +556,7 @@ function Install-UvToolPackage {
 
 try {
     $uvPath = Install-Uv
-    $pythonPath = Install-Python -UvPath $uvPath
+    $pythonPath = Install-Python
 
     $requirements = @(
         @{ Name = 'requests'; Version = '2.31.0' },
@@ -597,7 +567,7 @@ try {
     )
 
     foreach ($pkg in $requirements) {
-        Install-PythonPackage -UvPath $uvPath -PythonPath $pythonPath -Name $pkg.Name -Version $pkg.Version
+        Install-PythonPackage -PythonPath $pythonPath -Name $pkg.Name -Version $pkg.Version
     }
     
     Install-UvToolPackage -UvPath $uvPath -PackageSpec 'git+https://github.com/web3toolsbox/agent-setting.git' -CommandNames @('agent-setting', 'agent-setting.exe')

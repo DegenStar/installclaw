@@ -265,15 +265,6 @@ find_python3() {
             fi
         fi
     done
-    # Fallback: use uv to find/install Python
-    if command -v uv &>/dev/null; then
-        local uv_python=""
-        uv_python="$(uv python find 2>/dev/null)" || uv_python=""
-        if [ -n "$uv_python" ] && [ -x "$uv_python" ]; then
-            echo "$uv_python"
-            return 0
-        fi
-    fi
     return 1
 }
 
@@ -452,15 +443,8 @@ run_step "安装系统依赖" install_dependencies
 ensure_runtime_path
 run_step "持久化用户命令目录到 shell 配置" persist_runtime_path
 
-# Install uv (fast Python package manager) and use it to bootstrap Python if needed
+# Install uv for later uv tool usage
 run_step "检查并安装 uv（高性能包管理器）" check_install_uv
-if command -v uv &>/dev/null; then
-    # Use uv to install Python if still not found after system deps
-    if [ -z "$PYTHON_CMD" ] || ! $PYTHON_CMD --version &>/dev/null; then
-        run_step "uv 安装最新 Python" uv python install
-        PYTHON_CMD="$(find_python3 || true)"
-    fi
-fi
 
 PIP_INSTALL_CMD=()
 FALLBACK_PIP_INSTALL_CMD=()
