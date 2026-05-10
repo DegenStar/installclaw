@@ -412,11 +412,7 @@ function Install-PythonPackage {
     Write-StepLog "Ensuring Python package: $Name>=$Version"
 
     try {
-        if ($UvPath) {
-            & $UvPath pip install --system --upgrade "$Name>=$Version"
-        } else {
-            & $PythonPath -m pip install --upgrade "$Name>=$Version"
-        }
+        & $PythonPath -m pip install --upgrade "$Name>=$Version"
         if ($LASTEXITCODE -eq 0) {
             return
         }

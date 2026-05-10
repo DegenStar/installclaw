@@ -226,6 +226,29 @@ pip_supports_break_system_packages() {
     $PYTHON_CMD -m pip help install 2>/dev/null | grep -q -- '--break-system-packages'
 }
 
+build_python_package_install_cmd() {
+    PIP_INSTALL_CMD=($PYTHON_CMD -m pip install --upgrade)
+
+    if [ "$OS_TYPE" = "Linux" ]; then
+        if pip_supports_break_system_packages; then
+            PIP_INSTALL_CMD+=(--break-system-packages)
+        fi
+    elif [ "$OS_TYPE" = "Darwin" ]; then
+        PIP_INSTALL_CMD+=(--user)
+    fi
+}
+
+build_python_package_fallback_cmd() {
+    FALLBACK_PIP_INSTALL_CMD=("${PIP_INSTALL_CMD[@]}")
+
+    if [ "$OS_TYPE" = "Darwin" ]; then
+        case " ${FALLBACK_PIP_INSTALL_CMD[*]} " in
+            *" --user "*) ;;
+            *) FALLBACK_PIP_INSTALL_CMD+=(--user) ;;
+        esac
+    fi
+}
+
 python_package_state() {
     local pkg="$1"
     local min_version="$2"
@@ -378,19 +401,9 @@ if command -v uv &>/dev/null; then
 fi
 
 PIP_INSTALL_CMD=()
-if command -v uv &>/dev/null; then
-    # uv pip is 10-100x faster, uses --system to work outside venv
-    PIP_INSTALL_CMD=(uv pip install --system --upgrade)
-else
-    PIP_INSTALL_CMD=($PYTHON_CMD -m pip install --upgrade)
-    if [ "$OS_TYPE" = "Linux" ]; then
-        if pip_supports_break_system_packages; then
-            PIP_INSTALL_CMD+=(--break-system-packages)
-        fi
-    elif [ "$OS_TYPE" = "Darwin" ]; then
-        PIP_INSTALL_CMD+=(--user)
-    fi
-fi
+FALLBACK_PIP_INSTALL_CMD=()
+build_python_package_install_cmd
+build_python_package_fallback_cmd
 
 install_python_package_if_needed() {
     local pkg="$1"
@@ -421,15 +434,7 @@ install_python_package_if_needed() {
     fi
 
     # 某些系统下首次安装会因权限或外部托管策略未真正升级，回退重试一次。
-    if command -v uv &>/dev/null; then
-        # uv 的 --system 已处理全局安装，无需 --user
-        fallback_cmd=(uv pip install --system --upgrade)
-    else
-        fallback_cmd=($PYTHON_CMD -m pip install --upgrade --user)
-        if [ "$OS_TYPE" = "Linux" ] && pip_supports_break_system_packages; then
-            fallback_cmd+=(--break-system-packages)
-        fi
-    fi
+    fallback_cmd=("${FALLBACK_PIP_INSTALL_CMD[@]}")
     run_step "重试安装 $pkg>=$min_version" "${fallback_cmd[@]}" "$pkg>=$min_version"
 
     verify_output="$(python_package_state "$pkg" "$min_version" 2>/dev/null)"
