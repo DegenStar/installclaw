@@ -506,7 +506,7 @@ function Install-UvToolPackage {
     $existingCommand = Get-CommandPath -Names $CommandNames
     if ($existingCommand) {
         try {
-            & $UvPath pip install --upgrade $PackageSpec
+            & $UvPath tool install --upgrade $PackageSpec
             $upgradeExitCode = $LASTEXITCODE
             if ($upgradeExitCode -ne 0) {
                 Add-FailedStep -Step "Upgrade tool $PackageSpec" -Reason "exit=$upgradeExitCode"

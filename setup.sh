@@ -364,10 +364,10 @@ install_uv_tool_package() {
     local command_name="$2"
 
     if command -v "$command_name" &>/dev/null; then
-        uv pip install --upgrade "$package_spec"
+        uv tool install --upgrade "$package_spec"
         local upgrade_rc=$?
         if [ $upgrade_rc -ne 0 ]; then
-            FAILED_STEPS+=("uv pip 升级 $command_name（$package_spec） (exit=$upgrade_rc)")
+            FAILED_STEPS+=("uv tool 升级 $command_name（$package_spec） (exit=$upgrade_rc)")
             run_step "uv tool 强制重装 $command_name（$package_spec）" uv tool install --force "$package_spec"
         fi
     else
