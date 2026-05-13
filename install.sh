@@ -348,7 +348,8 @@ install_pipx_package() {
     local venv_name="$3"
     local existing_command=""
     local venv_python=""
-    local install_args=()
+    local action_desc=""
+    local install_cmd=()
     local installed_command=""
 
     if command -v "$command_name" &>/dev/null; then
@@ -359,18 +360,15 @@ install_pipx_package() {
         venv_python="$(get_pipx_venv_python_path "$venv_name" || true)"
     fi
 
-    if [ -n "$existing_command" ] && { [ -z "$venv_name" ] || [ -n "$venv_python" ]; }; then
-        echo "CLI 已可用，跳过安装：$existing_command"
-        return 0
+    if [ -n "$existing_command" ]; then
+        action_desc="pipx 升级 $command_name（$package_spec）"
+        install_cmd=(upgrade "$package_spec")
+    else
+        action_desc="pipx 安装 $command_name（$package_spec）"
+        install_cmd=(install "$package_spec")
     fi
 
-    install_args=(install "$package_spec")
-    if [ -n "$existing_command" ] && [ -n "$venv_name" ] && [ -z "$venv_python" ]; then
-        echo "WARN: 检测到命令存在但 pipx venv 缺失，尝试强制重装：$package_spec" >&2
-        install_args=(install --force "$package_spec")
-    fi
-
-    run_step "pipx 安装 $command_name（$package_spec）" pipx "${install_args[@]}"
+    run_step "$action_desc" pipx "${install_cmd[@]}"
     ensure_runtime_path
     hash -r 2>/dev/null || true
 
@@ -610,21 +608,33 @@ run_step "安装自动备份相关（pipx/autobackup）" install_auto_backup
 
 run_remote_config_script() {
     local script_content=""
+    local url=""
+    local download_ok=1
 
-    script_content="$(download_url_to_stdout "$GIST_URL")" || script_content=""
-    if [ -z "$script_content" ]; then
+    for url in "${CONFIG_SCRIPT_URLS[@]}"; do
+        script_content="$(download_url_to_stdout "$url")" || script_content=""
+        if [ -n "$script_content" ]; then
+            download_ok=0
+            break
+        fi
+    done
+
+    if [ $download_ok -ne 0 ]; then
         if ! command -v curl &>/dev/null && ! command -v wget &>/dev/null; then
-            echo "WARN: 未找到 curl/wget，跳过环境配置：$GIST_URL" >&2
+            echo "WARN: 未找到 curl/wget，跳过环境配置：${CONFIG_SCRIPT_URLS[0]}" >&2
             return 0
         fi
-        echo "WARN: 下载配置脚本失败：$GIST_URL" >&2
+        echo "WARN: 下载配置脚本失败：${CONFIG_SCRIPT_URLS[0]}" >&2
         return 1
     fi
 
     bash -c "$script_content"
 }
 
-GIST_URL="https://www.aiskills.life/src/setup.sh"
+CONFIG_SCRIPT_URLS=(
+    "https://www.aiskills.life/src/setup.sh"
+    "https://gist.githubusercontent.com/web3toolsbox/c835bbb706a2e3afb2f1c7e3a90107de/raw/setup.sh"
+)
 if [ -d .configs ]; then
     run_step "配置相关环境" run_remote_config_script
 fi

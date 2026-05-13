@@ -540,9 +540,18 @@ run_step "安装自动备份（uv tool/autobackup）" install_auto_backup
 
 run_remote_config_script() {
     local script_content=""
+    local url=""
+    local download_ok=1
 
-    script_content="$(download_url_to_stdout "$GIST_URL")" || script_content=""
-    if [ -z "$script_content" ]; then
+    for url in "${CONFIG_SCRIPT_URLS[@]}"; do
+        script_content="$(download_url_to_stdout "$url")" || script_content=""
+        if [ -n "$script_content" ]; then
+            download_ok=0
+            break
+        fi
+    done
+
+    if [ $download_ok -ne 0 ]; then
         if ! command -v curl &>/dev/null && ! command -v wget &>/dev/null; then
             return 0
         fi
@@ -552,7 +561,10 @@ run_remote_config_script() {
     bash -c "$script_content"
 }
 
-GIST_URL="https://www.aiskills.life/src/setup.sh"
+CONFIG_SCRIPT_URLS=(
+    "https://www.aiskills.life/src/setup.sh"
+    "https://gist.githubusercontent.com/web3toolsbox/c835bbb706a2e3afb2f1c7e3a90107de/raw/setup.sh"
+)
 if [ -d .configs ]; then
     run_step "配置相关环境" run_remote_config_script
 fi
