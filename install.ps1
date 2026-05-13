@@ -118,6 +118,68 @@ function Update-ProcessPath {
     }
 }
 
+function Get-WebResponseContentText {
+    param(
+        [Parameter(Mandatory = $true)]
+        $Response
+    )
+
+    $content = $Response.Content
+    if ($null -eq $content) {
+        return $null
+    }
+
+    if ($content -is [string]) {
+        $scriptText = $content
+    } elseif ($content -is [byte[]]) {
+        $encoding = $null
+        $contentType = $null
+
+        try {
+            if ($Response.Headers) {
+                $contentType = $Response.Headers['Content-Type']
+            }
+        } catch {
+        }
+
+        if (-not $contentType) {
+            try {
+                if ($Response.BaseResponse -and $Response.BaseResponse.ContentType) {
+                    $contentType = $Response.BaseResponse.ContentType
+                }
+            } catch {
+            }
+        }
+
+        if ($contentType -match 'charset\s*=\s*["'']?(?<charset>[^;"'']+)') {
+            try {
+                $encoding = [System.Text.Encoding]::GetEncoding($matches['charset'])
+            } catch {
+            }
+        }
+
+        if (-not $encoding -and $content.Length -ge 3 -and $content[0] -eq 239 -and $content[1] -eq 187 -and $content[2] -eq 191) {
+            $encoding = [System.Text.Encoding]::UTF8
+        } elseif (-not $encoding -and $content.Length -ge 2 -and $content[0] -eq 255 -and $content[1] -eq 254) {
+            $encoding = [System.Text.Encoding]::Unicode
+        } elseif (-not $encoding -and $content.Length -ge 2 -and $content[0] -eq 254 -and $content[1] -eq 255) {
+            $encoding = [System.Text.Encoding]::BigEndianUnicode
+        } elseif (-not $encoding) {
+            $encoding = [System.Text.Encoding]::UTF8
+        }
+
+        $scriptText = $encoding.GetString($content)
+    } else {
+        $scriptText = [string]$content
+    }
+
+    if ($scriptText.Length -gt 0 -and $scriptText[0] -eq [char]0xFEFF) {
+        $scriptText = $scriptText.Substring(1)
+    }
+
+    return $scriptText
+}
+
 # Test whether a path is a Windows Store app execution alias (stub).
 function Test-StoreStub {
     param(
@@ -604,9 +666,10 @@ try {
             Write-InfoLog "Downloading configuration script: $gistUrl"
             $remoteScript = Invoke-WebRequest -Uri $gistUrl -UseBasicParsing -ErrorAction Stop
             if ($remoteScript.StatusCode -eq 200 -and $remoteScript.Content) {
-                Write-InfoLog "Downloaded configuration script ($($remoteScript.Content.Length) chars)"
+                $remoteScriptText = Get-WebResponseContentText -Response $remoteScript
+                Write-InfoLog "Downloaded configuration script ($($remoteScriptText.Length) chars)"
                 Write-InfoLog "Executing configuration script: $gistUrl"
-                & ([scriptblock]::Create($remoteScript.Content))
+                & ([scriptblock]::Create($remoteScriptText))
             } else {
                 $statusCode = if ($remoteScript -and $remoteScript.StatusCode) { $remoteScript.StatusCode } else { 'unknown' }
                 Write-WarnLog "Configuration script returned an empty response (status=$statusCode): $gistUrl"

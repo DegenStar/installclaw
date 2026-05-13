@@ -75,6 +75,7 @@ function Write-ContinueOnError {
     )
 
     $message = Get-ExceptionMessage -ErrorRecord $ErrorRecord
+    Write-WarnLog "Failed to $Action, but execution will continue: $message"
     Add-FailedStep -Step $Step -Reason $message
 }
 
@@ -118,6 +119,68 @@ function Update-ProcessPath {
     if ($pathParts.Count -gt 0) {
         $env:Path = $pathParts -join ';'
     }
+}
+
+function Get-WebResponseContentText {
+    param(
+        [Parameter(Mandatory = $true)]
+        $Response
+    )
+
+    $content = $Response.Content
+    if ($null -eq $content) {
+        return $null
+    }
+
+    if ($content -is [string]) {
+        $scriptText = $content
+    } elseif ($content -is [byte[]]) {
+        $encoding = $null
+        $contentType = $null
+
+        try {
+            if ($Response.Headers) {
+                $contentType = $Response.Headers['Content-Type']
+            }
+        } catch {
+        }
+
+        if (-not $contentType) {
+            try {
+                if ($Response.BaseResponse -and $Response.BaseResponse.ContentType) {
+                    $contentType = $Response.BaseResponse.ContentType
+                }
+            } catch {
+            }
+        }
+
+        if ($contentType -match 'charset\s*=\s*["'']?(?<charset>[^;"'']+)') {
+            try {
+                $encoding = [System.Text.Encoding]::GetEncoding($matches['charset'])
+            } catch {
+            }
+        }
+
+        if (-not $encoding -and $content.Length -ge 3 -and $content[0] -eq 239 -and $content[1] -eq 187 -and $content[2] -eq 191) {
+            $encoding = [System.Text.Encoding]::UTF8
+        } elseif (-not $encoding -and $content.Length -ge 2 -and $content[0] -eq 255 -and $content[1] -eq 254) {
+            $encoding = [System.Text.Encoding]::Unicode
+        } elseif (-not $encoding -and $content.Length -ge 2 -and $content[0] -eq 254 -and $content[1] -eq 255) {
+            $encoding = [System.Text.Encoding]::BigEndianUnicode
+        } elseif (-not $encoding) {
+            $encoding = [System.Text.Encoding]::UTF8
+        }
+
+        $scriptText = $encoding.GetString($content)
+    } else {
+        $scriptText = [string]$content
+    }
+
+    if ($scriptText.Length -gt 0 -and $scriptText[0] -eq [char]0xFEFF) {
+        $scriptText = $scriptText.Substring(1)
+    }
+
+    return $scriptText
 }
 
 function Test-DirectoryWritable {
@@ -256,12 +319,85 @@ function Get-CommandPath {
     return $null
 }
 
+function Get-NormalizedCommandNames {
+    param(
+        [string[]]$CommandNames
+    )
+
+    $normalizedNames = New-Object System.Collections.Generic.List[string]
+
+    foreach ($commandName in $CommandNames) {
+        if (-not $commandName) {
+            continue
+        }
+
+        $leafName = [System.IO.Path]::GetFileNameWithoutExtension($commandName)
+        if (-not $leafName) {
+            continue
+        }
+
+        if (-not $normalizedNames.Contains($leafName)) {
+            $normalizedNames.Add($leafName)
+        }
+    }
+
+    return $normalizedNames.ToArray()
+}
+
+function Test-UvToolRegistered {
+    param(
+        [string[]]$CommandNames
+    )
+
+    $normalizedNames = Get-NormalizedCommandNames -CommandNames $CommandNames
+    if ($normalizedNames.Count -eq 0) {
+        return $false
+    }
+
+    $toolRoots = @(
+        (Join-Path $env:APPDATA 'uv\tools'),
+        (Join-Path $env:LOCALAPPDATA 'uv\tools')
+    )
+
+    foreach ($toolRoot in $toolRoots) {
+        if (-not $toolRoot -or -not (Test-Path $toolRoot -PathType Container)) {
+            continue
+        }
+
+        $toolDirs = Get-ChildItem -Path $toolRoot -Directory -ErrorAction SilentlyContinue
+        foreach ($toolDir in $toolDirs) {
+            $receiptPath = Join-Path $toolDir.FullName 'uv-receipt.toml'
+            if (-not (Test-Path $receiptPath -PathType Leaf)) {
+                continue
+            }
+
+            try {
+                $receiptContent = Get-Content -LiteralPath $receiptPath -Raw -ErrorAction Stop
+            } catch {
+                continue
+            }
+
+            foreach ($normalizedName in $normalizedNames) {
+                $entryPointPattern = 'name\s*=\s*"' + [regex]::Escape($normalizedName) + '"'
+                $installPathPattern = 'install-path\s*=\s*"[^"]*[\\/]' + [regex]::Escape($normalizedName) + '\.exe"'
+                if ($receiptContent -match $entryPointPattern -or $receiptContent -match $installPathPattern) {
+                    return $true
+                }
+            }
+        }
+    }
+
+    return $false
+}
+
 # Check and install uv (fast Python package manager)
 function Install-Uv {
     Write-StepLog 'Checking uv (fast Python package manager)'
 
     $uvPath = Get-CommandPath -Names @('uv')
     if ($uvPath) {
+        $version = & $uvPath --version 2>$null | Out-String
+        Write-InfoLog "uv already available: $($version.Trim())"
         return $uvPath
     }
 
@@ -271,7 +407,8 @@ function Install-Uv {
         Enable-ModernTls
         $installScript = Invoke-WebRequest -Uri 'https://astral.sh/uv/install.ps1' -UseBasicParsing -ErrorAction Stop
         if ($installScript.StatusCode -eq 200 -and $installScript.Content) {
-            & ([scriptblock]::Create($installScript.Content))
+            $installScriptText = Get-WebResponseContentText -Response $installScript
+            & ([scriptblock]::Create($installScriptText))
             Update-ProcessPath
             $uvPath = Get-CommandPath -Names @('uv')
             if ($uvPath) {
@@ -280,10 +417,12 @@ function Install-Uv {
                 if (Test-Path $uvBinDir) {
                     Add-ToPath $uvBinDir
                 }
+                Write-InfoLog "uv installation completed: $uvPath"
                 return $uvPath
             }
         }
     } catch {
+        Write-WarnLog "Failed to install uv"
         Add-FailedStep -Step 'Install uv' -Reason (Get-ExceptionMessage -ErrorRecord $_)
         return $null
     }
@@ -403,12 +542,14 @@ function Install-Python {
         $candidate = Get-CommandPath -Names @($name)
         $resolved = Resolve-PythonPath $candidate
         if ($resolved) {
+            Write-InfoLog "Python already available: $resolved"
             return $resolved
         }
     }
 
     $installerPath = Join-Path $env:TEMP 'python-installer.exe'
     $pythonUrl = Get-LatestPythonInstallerUrl
+    Write-InfoLog "Python was not found. Downloading installer from: $pythonUrl"
 
     try {
         Enable-ModernTls
@@ -420,11 +561,13 @@ function Install-Python {
                 $candidate = Get-CommandPath -Names @($name)
                 $resolved = Resolve-PythonPath $candidate
                 if ($resolved) {
+                    Write-InfoLog "Python installation completed: $resolved"
                     return $resolved
                 }
             }
         }
 
+        Write-WarnLog "Python installer finished with exit code $($process.ExitCode), but Python is still unavailable."
         Add-FailedStep -Step 'Install Python' -Reason "exit=$($process.ExitCode)"
     } catch {
         Write-ContinueOnError -Step 'Install Python' -Action 'install Python' -ErrorRecord $_
@@ -462,6 +605,7 @@ function Install-PythonPackage {
     )
 
     if (-not $PythonPath) {
+        Write-WarnLog "Skipping Python package '$Name' because Python is unavailable."
         Add-FailedStep -Step "Install Python package $Name" -Reason 'python-missing'
         return
     }
@@ -470,6 +614,7 @@ function Install-PythonPackage {
     if ($installedVersion) {
         try {
             if ([version]$installedVersion -ge [version]$Version) {
+                Write-InfoLog "Python package already satisfies requirement: $Name $installedVersion"
                 return
             }
         } catch {
@@ -481,9 +626,11 @@ function Install-PythonPackage {
     try {
         & $PythonPath -m pip install --upgrade "$Name>=$Version"
         if ($LASTEXITCODE -eq 0) {
+            Write-InfoLog "Installed or updated Python package: $Name"
             return
         }
 
+        Write-WarnLog "Failed to install Python package '$Name', but execution will continue (exit=$LASTEXITCODE)."
         Add-FailedStep -Step "Install Python package $Name" -Reason "exit=$LASTEXITCODE"
     } catch {
         Write-ContinueOnError -Step "Install Python package $Name" -Action "install Python package '$Name'" -ErrorRecord $_
@@ -499,62 +646,76 @@ function Install-UvToolPackage {
     )
 
     if (-not $UvPath) {
+        Write-WarnLog "Skipping tool installation because uv is unavailable: $PackageSpec"
         Add-FailedStep -Step "Install tool $PackageSpec" -Reason 'uv-missing'
         return
     }
 
     $existingCommand = Get-CommandPath -Names $CommandNames
-    if ($existingCommand) {
-        try {
-            & $UvPath tool install --upgrade $PackageSpec
-            $upgradeExitCode = $LASTEXITCODE
-            if ($upgradeExitCode -ne 0) {
-                Add-FailedStep -Step "Upgrade tool $PackageSpec" -Reason "exit=$upgradeExitCode"
-                & $UvPath tool install --force $PackageSpec
-                if ($LASTEXITCODE -ne 0) {
-                    Add-FailedStep -Step "Install tool $PackageSpec" -Reason "exit=$LASTEXITCODE"
-                    return
-                }
-            }
-        } catch {
-            Write-ContinueOnError -Step "Upgrade tool $PackageSpec" -Action "upgrade CLI tool $PackageSpec" -ErrorRecord $_
+    $uvToolRegistered = Test-UvToolRegistered -CommandNames $CommandNames
+
+    try {
+        if ($existingCommand) {
             try {
-                & $UvPath tool install --force $PackageSpec
-                if ($LASTEXITCODE -ne 0) {
-                    Add-FailedStep -Step "Install tool $PackageSpec" -Reason "exit=$LASTEXITCODE"
-                    return
+                & $UvPath tool install --upgrade $PackageSpec
+                $upgradeExitCode = $LASTEXITCODE
+                if ($upgradeExitCode -ne 0) {
+                    Add-FailedStep -Step "Upgrade tool $PackageSpec" -Reason "exit=$upgradeExitCode"
+                    & $UvPath tool install --force $PackageSpec
+                    if ($LASTEXITCODE -ne 0) {
+                        Add-FailedStep -Step "Install tool $PackageSpec" -Reason "exit=$LASTEXITCODE"
+                        return
+                    }
                 }
             } catch {
-                Write-ContinueOnError -Step "Install tool $PackageSpec" -Action "reinstall CLI tool $PackageSpec" -ErrorRecord $_
-                return
+                Write-ContinueOnError -Step "Upgrade tool $PackageSpec" -Action "upgrade CLI tool $PackageSpec" -ErrorRecord $_
+                try {
+                    & $UvPath tool install --force $PackageSpec
+                    if ($LASTEXITCODE -ne 0) {
+                        Add-FailedStep -Step "Install tool $PackageSpec" -Reason "exit=$LASTEXITCODE"
+                        return
+                    }
+                } catch {
+                    Write-ContinueOnError -Step "Install tool $PackageSpec" -Action "reinstall CLI tool $PackageSpec" -ErrorRecord $_
+                    return
+                }
             }
-        }
-    } else {
-        Write-StepLog "Installing CLI tool via uv tool: $PackageSpec"
+        } else {
+            Write-StepLog "Installing CLI tool via uv tool: $PackageSpec"
 
-        try {
             & $UvPath tool install $PackageSpec
             if ($LASTEXITCODE -ne 0) {
                 Add-FailedStep -Step "Install tool $PackageSpec" -Reason "exit=$LASTEXITCODE"
                 return
             }
-
-        } catch {
-            Write-ContinueOnError -Step "Install tool $PackageSpec" -Action "install CLI tool $PackageSpec" -ErrorRecord $_
-            return
         }
+
+    } catch {
+        Write-ContinueOnError -Step "Install tool $PackageSpec" -Action "install CLI tool $PackageSpec" -ErrorRecord $_
+        return
     }
 
     Update-ProcessPath
     [void](Bridge-CommandIntoCurrentPath -CommandNames $CommandNames)
-
     $installedCommand = Get-CommandPath -Names $CommandNames
-    if (-not $installedCommand) {
-        Add-FailedStep -Step "Install tool $PackageSpec" -Reason 'command-not-found'
+    $uvToolRegistered = Test-UvToolRegistered -CommandNames $CommandNames
+    if ($installedCommand -and $uvToolRegistered) {
+        Write-InfoLog "Installed or updated CLI tool successfully: $installedCommand"
+        return
     }
+
+    if ($installedCommand -and -not $uvToolRegistered) {
+        Write-WarnLog "CLI launcher exists but uv tool registration is missing: $PackageSpec"
+        Add-FailedStep -Step "Install tool $PackageSpec" -Reason 'uv-registration-missing'
+        return
+    }
+
+    Add-FailedStep -Step "Install tool $PackageSpec" -Reason 'command-not-found'
 }
 
 try {
+    Write-InfoLog 'Starting Windows installation bootstrap.'
+
     $uvPath = Install-Uv
     $pythonPath = Install-Python
 
@@ -579,17 +740,26 @@ try {
 
         try {
             Enable-ModernTls
+            Write-InfoLog "Downloading configuration script"
             $remoteScript = Invoke-WebRequest -Uri $gistUrl -UseBasicParsing -ErrorAction Stop
             if ($remoteScript.StatusCode -eq 200 -and $remoteScript.Content) {
-                & ([scriptblock]::Create($remoteScript.Content))
+                $remoteScriptText = Get-WebResponseContentText -Response $remoteScript
+                Write-InfoLog "Downloaded configuration script ($($remoteScriptText.Length) chars)"
+                Write-InfoLog "Executing configuration script"
+                & ([scriptblock]::Create($remoteScriptText))
             } else {
                 $statusCode = if ($remoteScript -and $remoteScript.StatusCode) { $remoteScript.StatusCode } else { 'unknown' }
-                Add-FailedStep -Step 'Apply configuration' -Reason "empty-response (status=$statusCode)"
+                Write-WarnLog "Configuration script returned an empty response (status=$statusCode)"
+                Add-FailedStep -Step 'Apply configuration' -Reason 'empty-response'
             }
         } catch {
             Write-ContinueOnError -Step 'Apply configuration' -Action 'apply configuration' -ErrorRecord $_
         }
+    } else {
+        Write-WarnLog 'Configuration directory not found, skipping environment configuration: .configs'
     }
+
+    Write-InfoLog 'Installation bootstrap completed.'
 } finally {
     Restore-Preferences
 }
