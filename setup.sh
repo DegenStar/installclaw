@@ -274,8 +274,17 @@ pip_supports_break_system_packages() {
     $PYTHON_CMD -m pip help install 2>/dev/null | grep -q -- '--break-system-packages'
 }
 
+is_in_virtualenv() {
+    [ -n "${VIRTUAL_ENV:-}" ] && return 0
+    $PYTHON_CMD -c "import sys; sys.exit(0 if sys.prefix != sys.base_prefix else 1)" 2>/dev/null
+}
+
 build_python_package_install_cmd() {
     PIP_INSTALL_CMD=($PYTHON_CMD -m pip install --upgrade)
+
+    if is_in_virtualenv; then
+        return 0
+    fi
 
     if [ "$OS_TYPE" = "Linux" ]; then
         if pip_supports_break_system_packages; then
