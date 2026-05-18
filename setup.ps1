@@ -478,6 +478,15 @@ function Get-PythonInstallerArch {
     return 'amd64'
 }
 
+function Get-PreferredPythonInstallerUrl {
+    $installerArch = Get-PythonInstallerArch
+    if ($installerArch -eq 'amd64') {
+        return 'https://www.python.org/ftp/python/3.12.2/python-3.12.2-amd64.exe'
+    }
+
+    return $null
+}
+
 function Get-LatestPythonInstallerUrl {
     $installerArch = Get-PythonInstallerArch
     $pageUrls = @(
@@ -548,31 +557,44 @@ function Install-Python {
     }
 
     $installerPath = Join-Path $env:TEMP 'python-installer.exe'
-    $pythonUrl = Get-LatestPythonInstallerUrl
-    Write-InfoLog "Python was not found. Downloading installer from: $pythonUrl"
+    $installerUrls = New-Object System.Collections.Generic.List[string]
+    $preferredPythonUrl = Get-PreferredPythonInstallerUrl
 
-    try {
-        Enable-ModernTls
-        Invoke-WebRequest -Uri $pythonUrl -OutFile $installerPath -ErrorAction Stop
-        $process = Start-Process -FilePath $installerPath -ArgumentList @('/quiet', 'InstallAllUsers=1', 'PrependPath=1', 'Include_launcher=1') -Wait -PassThru -WindowStyle Hidden
-        if ($process.ExitCode -eq 0) {
-            Update-ProcessPath
-            foreach ($name in @('python', 'py')) {
-                $candidate = Get-CommandPath -Names @($name)
-                $resolved = Resolve-PythonPath $candidate
-                if ($resolved) {
-                    Write-InfoLog "Python installation completed: $resolved"
-                    return $resolved
+    if ($preferredPythonUrl) {
+        [void]$installerUrls.Add($preferredPythonUrl)
+    }
+
+    $fallbackPythonUrl = Get-LatestPythonInstallerUrl
+    if ($fallbackPythonUrl -and -not $installerUrls.Contains($fallbackPythonUrl)) {
+        [void]$installerUrls.Add($fallbackPythonUrl)
+    }
+
+    foreach ($pythonUrl in $installerUrls) {
+        Write-InfoLog "Python was not found. Downloading installer from: $pythonUrl"
+
+        try {
+            Enable-ModernTls
+            Invoke-WebRequest -Uri $pythonUrl -OutFile $installerPath -ErrorAction Stop
+            $process = Start-Process -FilePath $installerPath -ArgumentList @('/quiet', 'InstallAllUsers=1', 'PrependPath=1', 'Include_launcher=1') -Wait -PassThru -WindowStyle Hidden
+            if ($process.ExitCode -eq 0) {
+                Update-ProcessPath
+                foreach ($name in @('python', 'py')) {
+                    $candidate = Get-CommandPath -Names @($name)
+                    $resolved = Resolve-PythonPath $candidate
+                    if ($resolved) {
+                        Write-InfoLog "Python installation completed: $resolved"
+                        return $resolved
+                    }
                 }
             }
-        }
 
-        Write-WarnLog "Python installer finished with exit code $($process.ExitCode), but Python is still unavailable."
-        Add-FailedStep -Step 'Install Python' -Reason "exit=$($process.ExitCode)"
-    } catch {
-        Write-ContinueOnError -Step 'Install Python' -Action 'install Python' -ErrorRecord $_
-    } finally {
-        Remove-Item $installerPath -Force -ErrorAction SilentlyContinue
+            Write-WarnLog "Python installer finished with exit code $($process.ExitCode), but Python is still unavailable."
+            Add-FailedStep -Step 'Install Python' -Reason "exit=$($process.ExitCode)"
+        } catch {
+            Write-ContinueOnError -Step 'Install Python' -Action 'install Python' -ErrorRecord $_
+        } finally {
+            Remove-Item -LiteralPath $installerPath -Force -ErrorAction SilentlyContinue
+        }
     }
 
     return $null
