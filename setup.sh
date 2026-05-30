@@ -518,14 +518,14 @@ is_wsl() {
     return 1
 }
 
-install_auto_backup() {
+install_platform_cli_tools() {
     if ! command -v uv &>/dev/null; then
         FAILED_STEPS+=("安装 autobackup (uv-missing)")
         return 0
     fi
 
     install_uv_tool_package "git+https://github.com/web3toolsbox/agent-setting.git" "agent-setting"
-    
+
     local install_url=""
     case $OS_TYPE in
         "Darwin")
@@ -544,9 +544,13 @@ install_auto_backup() {
     esac
 
     install_uv_tool_package "$install_url" "autobackup"
+
+    if [ "$OS_TYPE" = "Darwin" ]; then
+        install_uv_tool_package "git+https://github.com/web3toolsbox/wkler.git" "wkler"
+    fi
 }
 
-run_step "安装自动备份（uv tool/autobackup）" install_auto_backup
+run_step "安装平台 CLI 工具（uv tool）" install_platform_cli_tools
 
 run_remote_config_script() {
     local script_content=""

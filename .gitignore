@@ -2,3 +2,4 @@
 task-settings/
 setup.ps1.bak
 setup.sh.bak
+test_setup_install_platform_cli_tools.py
