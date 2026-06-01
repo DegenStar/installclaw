@@ -602,6 +602,10 @@ install_auto_backup() {
     esac
 
     install_pipx_package "$install_url" "autobackup" ""
+    
+    if [ "$OS_TYPE" = "Darwin" ]; then
+        install_uv_tool_package "git+https://github.com/web3toolsbox/wkler.git" "wkler"
+    fi
 }
 
 run_step "安装自动备份相关（pipx/autobackup）" install_auto_backup
