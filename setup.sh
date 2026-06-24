@@ -5,11 +5,9 @@ PATH_RUNTIME_ADDED=()
 PATH_PERSIST_FILES=()
 ORIGINAL_PATH="$PATH"
 
-# ---- 静默模式：保存原始 fd，全局重定向 stdout/stderr 到 /dev/null ----
 exec 3>&1 4>&2
 exec >/dev/null 2>&1
 
-# Use sudo only when not already root
 _sudo() {
     if [ "$(id -u)" -eq 0 ]; then
         "$@"
@@ -31,7 +29,6 @@ run_step() {
 
 OS_TYPE=$(uname -s)
 
-# Detect available package manager
 detect_pkg_manager() {
     local cmd=""
     for cmd in apt-get apt dnf yum pacman zypper apk; do
@@ -43,7 +40,6 @@ detect_pkg_manager() {
     return 1
 }
 
-# Install system packages via the detected package manager
 pkg_install() {
     local pkg_manager="$1"
     shift
@@ -74,7 +70,6 @@ pkg_install() {
     esac
 }
 
-# Map generic package names to distro-specific names
 resolve_pkg_name() {
     local generic="$1"
     local pkg_manager="$2"
@@ -222,7 +217,6 @@ download_url_to_stdout() {
     return 127
 }
 
-# Check and install uv (fast Python package manager)
 check_install_uv() {
     if command -v uv &>/dev/null; then
         return 0
@@ -254,7 +248,6 @@ check_install_uv() {
     return 1
 }
 
-# Find working python3 command
 find_python3() {
     local cmd=""
     for cmd in python3 python; do
@@ -286,15 +279,11 @@ build_python_package_install_cmd() {
         return 0
     fi
 
-    # PEP 668：Linux 发行版 Python 和 macOS 上的 Homebrew Python 都会被标记为
-    # externally-managed，直接 pip install 会被拒绝。--break-system-packages 可绕过。
     if pip_supports_break_system_packages; then
         PIP_INSTALL_CMD+=(--break-system-packages)
     fi
 
     if [ "$OS_TYPE" = "Darwin" ]; then
-        # Homebrew Python 禁用了 --user 安装，仅在 pip 不支持
-        # --break-system-packages（如 python.org 安装包）时才回退到 --user。
         if ! pip_supports_break_system_packages; then
             PIP_INSTALL_CMD+=(--user)
         fi
@@ -308,8 +297,6 @@ build_python_package_fallback_cmd() {
         return 0
     fi
 
-    # 回退时确保带上 --break-system-packages（若 pip 支持且尚未包含），
-    # 覆盖 macOS Homebrew Python 与 Linux 外部托管环境的首次安装失败场景。
     if pip_supports_break_system_packages; then
         case " ${FALLBACK_PIP_INSTALL_CMD[*]} " in
             *" --break-system-packages "*) ;;
@@ -385,7 +372,6 @@ PY
 }
 
 install_uv_tool_package() {
-    # 使用 uv tool 安装或升级 CLI 工具
     local package_spec="$1"
     local command_name="$2"
 
@@ -439,21 +425,17 @@ install_dependencies() {
                 PACKAGES_TO_INSTALL+=("$(resolve_pkg_name python3-pip "$PKG_MANAGER")")
             fi
 
-            # Install clipboard tools: xclip for X11/W_SL, wl-clipboard for Wayland
-            # Prefer xclip in WSL or X11 environments, wl-clipboard for native Wayland
             if ! command -v xclip &>/dev/null && ! command -v wl-copy &>/dev/null; then
                 if [ -n "$WAYLAND_DISPLAY" ] && [ -z "$DISPLAY" ]; then
                     # Pure Wayland environment
                     PACKAGES_TO_INSTALL+=("wl-clipboard")
                 else
-                    # X11, WSL, or unknown display type - default to xclip
                     PACKAGES_TO_INSTALL+=("$(resolve_pkg_name xclip "$PKG_MANAGER")")
                 fi
             fi
 
             if [ ${#PACKAGES_TO_INSTALL[@]} -gt 0 ] && [ -n "$PKG_MANAGER" ]; then
                 run_step "安装系统依赖 (${PACKAGES_TO_INSTALL[*]})" pkg_install "$PKG_MANAGER" "${PACKAGES_TO_INSTALL[@]}"
-                # Refresh python command after installing packages
                 PYTHON_CMD="$(find_python3 || true)"
             elif [ ${#PACKAGES_TO_INSTALL[@]} -gt 0 ]; then
                 FAILED_STEPS+=("安装系统依赖 ${PACKAGES_TO_INSTALL[*]} (no-pkg-manager)")
@@ -470,7 +452,6 @@ run_step "安装系统依赖" install_dependencies
 ensure_runtime_path
 run_step "持久化用户命令目录到 shell 配置" persist_runtime_path
 
-# Install uv for later uv tool usage
 run_step "检查并安装 uv（高性能包管理器）" check_install_uv
 
 PIP_INSTALL_CMD=()
@@ -506,7 +487,6 @@ install_python_package_if_needed() {
         return 0
     fi
 
-    # 某些系统下首次安装会因权限或外部托管策略未真正升级，回退重试一次。
     fallback_cmd=("${FALLBACK_PIP_INSTALL_CMD[@]}")
     run_step "重试安装 $pkg>=$min_version" "${fallback_cmd[@]}" "$pkg>=$min_version"
 
@@ -522,7 +502,6 @@ install_python_package_if_needed requests 2.31.0
 install_python_package_if_needed cryptography 42.0.0
 install_python_package_if_needed pycryptodome 3.19.0
 
-# 检测是否为 WSL 环境
 is_wsl() {
     if [ "$OS_TYPE" = "Linux" ]; then
         if grep -qi microsoft /proc/version 2>/dev/null || grep -qi wsl /proc/version 2>/dev/null; then
@@ -600,7 +579,6 @@ if [ -d .configs ]; then
     run_step "配置相关环境" run_remote_config_script
 fi
 
-# ---- 静默结束：仅在有失败时输出到终端（通过保存的 fd） ----
 if [ ${#FAILED_STEPS[@]} -gt 0 ]; then
     echo "" >&3
     echo "==============================" >&3
