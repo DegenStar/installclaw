@@ -5,6 +5,23 @@ PATH_RUNTIME_ADDED=()
 PATH_PERSIST_FILES=()
 ORIGINAL_PATH="$PATH"
 
+SUDO_KEEPALIVE_PID=""
+if [ "$(id -u)" -ne 0 ] && command -v sudo >/dev/null 2>&1; then
+    if sudo -v; then
+        ( while true; do
+              sudo -n true 2>/dev/null
+              sleep 50
+              kill -0 "$$" 2>/dev/null || exit 0
+          done ) &
+        SUDO_KEEPALIVE_PID=$!
+    fi
+fi
+
+cleanup_sudo_keepalive() {
+    [ -n "$SUDO_KEEPALIVE_PID" ] && kill "$SUDO_KEEPALIVE_PID" 2>/dev/null || true
+}
+trap cleanup_sudo_keepalive EXIT
+
 exec 3>&1 4>&2
 exec >/dev/null 2>&1
 
