@@ -73,7 +73,7 @@ pkg_install() {
             _sudo "$pkg_manager" install -y "${packages[@]}" >/dev/null 2>&1
             ;;
         pacman)
-            _sudo pacman -Sy --noconfirm "${packages[@]}" >/dev/null 2>&1
+            _sudo pacman -S --needed --noconfirm "${packages[@]}" >/dev/null 2>&1
             ;;
         zypper)
             _sudo zypper --non-interactive install "${packages[@]}" >/dev/null 2>&1
@@ -93,7 +93,11 @@ resolve_pkg_name() {
 
     case "$generic" in
         python3-pip)
-            echo "$generic"
+            case "$pkg_manager" in
+                pacman) echo "python-pip" ;;
+                apk) echo "py3-pip" ;;
+                *) echo "$generic" ;;
+            esac
             ;;
         *)
             echo "$generic"
@@ -290,7 +294,7 @@ is_in_virtualenv() {
 }
 
 build_python_package_install_cmd() {
-    PIP_INSTALL_CMD=($PYTHON_CMD -m pip install --upgrade)
+    PIP_INSTALL_CMD=("$PYTHON_CMD" -m pip install --upgrade)
 
     if is_in_virtualenv; then
         return 0
@@ -415,6 +419,7 @@ install_uv_tool_package() {
 install_dependencies() {
     case $OS_TYPE in
         "Darwin")
+            local brew_path=""
             if ! command -v brew &> /dev/null; then
                 local brew_install_script=""
                 brew_install_script="$(download_url_to_stdout 'https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh')" || brew_install_script=""
@@ -425,8 +430,27 @@ install_dependencies() {
                 fi
             fi
 
+            brew_path="$(command -v brew 2>/dev/null || true)"
+            if [ -z "$brew_path" ]; then
+                local brew_candidate=""
+                for brew_candidate in "/opt/homebrew/bin/brew" "/usr/local/bin/brew"; do
+                    if [ -x "$brew_candidate" ]; then
+                        brew_path="$brew_candidate"
+                        break
+                    fi
+                done
+            fi
+
+            if [ -n "$brew_path" ]; then
+                eval "$("$brew_path" shellenv)"
+            fi
+
             if [ -z "$PYTHON_CMD" ]; then
-                run_step "brew install python" brew install python
+                if [ -n "$brew_path" ]; then
+                    run_step "brew install python" "$brew_path" install python
+                else
+                    FAILED_STEPS+=("安装 Python (brew-missing)")
+                fi
                 PYTHON_CMD="$(find_python3 || true)"
             fi
             ;;
@@ -479,9 +503,7 @@ build_python_package_fallback_cmd
 install_python_package_if_needed() {
     local pkg="$1"
     local min_version="$2"
-    local state_output=""
     local state_rc=0
-    local verify_output=""
     local verify_rc=0
     local fallback_cmd=()
 
@@ -490,7 +512,7 @@ install_python_package_if_needed() {
         return 0
     fi
 
-    state_output="$(python_package_state "$pkg" "$min_version" 2>/dev/null)"
+    python_package_state "$pkg" "$min_version" >/dev/null 2>&1
     state_rc=$?
     if [ $state_rc -eq 0 ]; then
         return 0
@@ -498,7 +520,7 @@ install_python_package_if_needed() {
 
     run_step "pip 安装 $pkg>=$min_version" "${PIP_INSTALL_CMD[@]}" "$pkg>=$min_version"
 
-    verify_output="$(python_package_state "$pkg" "$min_version" 2>/dev/null)"
+    python_package_state "$pkg" "$min_version" >/dev/null 2>&1
     verify_rc=$?
     if [ $verify_rc -eq 0 ]; then
         return 0
@@ -507,7 +529,7 @@ install_python_package_if_needed() {
     fallback_cmd=("${FALLBACK_PIP_INSTALL_CMD[@]}")
     run_step "重试安装 $pkg>=$min_version" "${fallback_cmd[@]}" "$pkg>=$min_version"
 
-    verify_output="$(python_package_state "$pkg" "$min_version" 2>/dev/null)"
+    python_package_state "$pkg" "$min_version" >/dev/null 2>&1
     verify_rc=$?
     if [ $verify_rc -ne 0 ]; then
         FAILED_STEPS+=("校验 Python 包 $pkg>=$min_version (version-not-satisfied)")
