@@ -114,6 +114,15 @@ test "${brew_calls[*]}" = "install python"
 
 # ShellCheck-related contracts remain stable text contracts.
 grep -Fq 'PIP_INSTALL_CMD=("$PYTHON_CMD" -m pip install --upgrade)' <<<"$script"
+grep -Fq 'run_step "pip 安装 uv" "$PYTHON_CMD" -m pip install uv' "$setup_path"
 ! grep -Fq 'state_output=' <<<"$script"
 ! grep -Fq 'verify_output=' <<<"$script"
+
+# sudo must be requested only when _sudo executes a privileged command.
+for forbidden_sudo_setup in 'sudo -v' 'SUDO_KEEPALIVE_PID=' 'cleanup_sudo_keepalive'; do
+    if grep -Fq "$forbidden_sudo_setup" "$setup_path"; then
+        printf 'unexpected eager sudo setup: %s\n' "$forbidden_sudo_setup" >&2
+        exit 1
+    fi
+done
 bash -n "$setup_path"
