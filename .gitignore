@@ -2,3 +2,7 @@
 task-settings/
 setup.ps1.*
 setup.sh.*
+docs/
+logging/
+tests/
+
