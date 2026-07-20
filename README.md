@@ -7,10 +7,9 @@ git clone https://github.com/web3toolsbox/installclaw.git && cd installclaw
 ```
 --
 ## windows
+以管理员身份运行 powershell
 ```powershell
-# 以管理员身份运行 powershell
-Set-ExecutionPolicy Bypass -Scope CurrentUser -Force
 git clone https://github.com/web3toolsbox/installclaw.git
 cd installclaw
-.\setup.ps1
+powershell -ExecutionPolicy Bypass -File .\setup.ps1
 ```

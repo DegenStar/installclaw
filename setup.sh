@@ -11,6 +11,8 @@ exec >/dev/null 2>&1
 _sudo() {
     if [ "$(id -u)" -eq 0 ]; then
         "$@"
+    elif sudo -n -v >/dev/null 2>&1; then
+        sudo -n "$@"
     else
         sudo "$@"
     fi
