@@ -1,8 +1,18 @@
 param(
-    [string]$RelaunchWorkingDirectory
+    [string]$RelaunchWorkingDirectory,
+    [string]$ExpectedUserSid
 )
 
-if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+$currentIdentity = [Security.Principal.WindowsIdentity]::GetCurrent()
+$currentUserSid = if ($currentIdentity.User) { $currentIdentity.User.Value } else { $null }
+if (-not $currentUserSid) {
+    Write-Host '[ERROR] Unable to determine the user running this script.' -ForegroundColor Red
+    exit 1
+}
+
+if (-not ([Security.Principal.WindowsPrincipal]$currentIdentity).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+    # Always bind elevation to the user who launched the non-elevated script.
+    $ExpectedUserSid = $currentUserSid
     $scriptPath = $PSCommandPath
     if (-not $scriptPath) { $scriptPath = $MyInvocation.MyCommand.Definition }
 
@@ -15,7 +25,8 @@ if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdenti
     $relaunchArgs = @(
         '-NoProfile', '-ExecutionPolicy', 'Bypass',
         '-File', (& $quote $scriptPath),
-        '-RelaunchWorkingDirectory', (& $quote $workDir)
+        '-RelaunchWorkingDirectory', (& $quote $workDir),
+        '-ExpectedUserSid', (& $quote $ExpectedUserSid)
     )
     foreach ($a in $args) {
         if ($null -ne $a) { $relaunchArgs += (& $quote $a) }
@@ -30,6 +41,11 @@ if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdenti
         Write-Host '[ERROR] Administrator privileges are required; elevation was cancelled or blocked.' -ForegroundColor Red
         exit 1
     }
+}
+
+if ($ExpectedUserSid -and $ExpectedUserSid -ne $currentUserSid) {
+    Write-Host '[ERROR] UAC elevation must use the same user that started this script.' -ForegroundColor Red
+    exit 1
 }
 
 if ($RelaunchWorkingDirectory -and (Test-Path -LiteralPath $RelaunchWorkingDirectory -PathType Container)) {
