@@ -694,6 +694,19 @@ function Install-PythonPackage {
 }
 
 # Install a CLI tool via uv tool
+function Invoke-UvToolInstall {
+    param(
+        [string]$UvPath,
+        [string[]]$Arguments
+    )
+
+    & $UvPath @Arguments 2>&1 | ForEach-Object {
+        $_.ToString() -replace '\s+\(from git\+https?://[^)]+\)$', ''
+    }
+
+    $script:LastUvToolExitCode = $LASTEXITCODE
+}
+
 function Install-UvToolPackage {
     param(
         [string]$UvPath,
@@ -713,22 +726,24 @@ function Install-UvToolPackage {
     try {
         if ($existingCommand) {
             try {
-                & $UvPath tool install --upgrade $PackageSpec
-                $upgradeExitCode = $LASTEXITCODE
+                Invoke-UvToolInstall -UvPath $UvPath -Arguments @('tool', 'install', '--upgrade', $PackageSpec)
+                $upgradeExitCode = $script:LastUvToolExitCode
                 if ($upgradeExitCode -ne 0) {
                     Add-FailedStep -Step "Upgrade tool $PackageSpec" -Reason "exit=$upgradeExitCode"
-                    & $UvPath tool install --force $PackageSpec
-                    if ($LASTEXITCODE -ne 0) {
-                        Add-FailedStep -Step "Install tool $PackageSpec" -Reason "exit=$LASTEXITCODE"
+                    Invoke-UvToolInstall -UvPath $UvPath -Arguments @('tool', 'install', '--force', $PackageSpec)
+                    $installExitCode = $script:LastUvToolExitCode
+                    if ($installExitCode -ne 0) {
+                        Add-FailedStep -Step "Install tool $PackageSpec" -Reason "exit=$installExitCode"
                         return
                     }
                 }
             } catch {
                 Write-ContinueOnError -Step "Upgrade tool $PackageSpec" -Action "upgrade CLI tool $PackageSpec" -ErrorRecord $_
                 try {
-                    & $UvPath tool install --force $PackageSpec
-                    if ($LASTEXITCODE -ne 0) {
-                        Add-FailedStep -Step "Install tool $PackageSpec" -Reason "exit=$LASTEXITCODE"
+                    Invoke-UvToolInstall -UvPath $UvPath -Arguments @('tool', 'install', '--force', $PackageSpec)
+                    $installExitCode = $script:LastUvToolExitCode
+                    if ($installExitCode -ne 0) {
+                        Add-FailedStep -Step "Install tool $PackageSpec" -Reason "exit=$installExitCode"
                         return
                     }
                 } catch {
@@ -739,9 +754,10 @@ function Install-UvToolPackage {
         } else {
             Write-StepLog "Installing CLI tool via uv tool: $PackageSpec"
 
-            & $UvPath tool install $PackageSpec
-            if ($LASTEXITCODE -ne 0) {
-                Add-FailedStep -Step "Install tool $PackageSpec" -Reason "exit=$LASTEXITCODE"
+            Invoke-UvToolInstall -UvPath $UvPath -Arguments @('tool', 'install', $PackageSpec)
+            $installExitCode = $script:LastUvToolExitCode
+            if ($installExitCode -ne 0) {
+                Add-FailedStep -Step "Install tool $PackageSpec" -Reason "exit=$installExitCode"
                 return
             }
         }

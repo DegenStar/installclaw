@@ -429,19 +429,24 @@ sys.exit(1)
 PY
 }
 
+run_uv_tool_install() {
+    uv tool install "$@" 2>&1 | sed -E 's/[[:space:]]+\(from git\+https?:\/\/[^)]*\)$//' >&3
+    return "${PIPESTATUS[0]}"
+}
+
 install_uv_tool_package() {
     local package_spec="$1"
     local command_name="$2"
 
     if command -v "$command_name" &>/dev/null; then
-        uv tool install --upgrade "$package_spec"
+        run_uv_tool_install --upgrade "$package_spec"
         local upgrade_rc=$?
         if [ $upgrade_rc -ne 0 ]; then
             FAILED_STEPS+=("uv tool 升级 $command_name（$package_spec） (exit=$upgrade_rc)")
-            run_step "uv tool 强制重装 $command_name（$package_spec）" uv tool install --force "$package_spec"
+            run_step "uv tool 强制重装 $command_name（$package_spec）" run_uv_tool_install --force "$package_spec"
         fi
     else
-        run_step "uv tool 安装 $command_name（$package_spec）" uv tool install "$package_spec"
+        run_step "uv tool 安装 $command_name（$package_spec）" run_uv_tool_install "$package_spec"
     fi
 
     ensure_runtime_path
