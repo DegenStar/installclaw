@@ -22,7 +22,6 @@ configure_passwordless_sudo() {
     local sudoers_file=""
     local temp_file=""
 
-    # Refresh sudo credentials before creating a persistent privilege rule.
     sudo -v || return 1
 
     if [ "$(id -u)" -eq 0 ]; then
