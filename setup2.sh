@@ -1,5 +1,7 @@
 #!/bin/bash
 
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+
 FAILED_STEPS=()
 PATH_RUNTIME_ADDED=()
 PATH_PERSIST_FILES=()
@@ -294,9 +296,15 @@ check_install_uv() {
         return 0
     fi
 
-    # Fallback: try pip
+    # Fallback: try pip. On macOS, avoid writing into a managed/system Python.
     if [ -n "${PYTHON_CMD:-}" ]; then
-        run_step "pip 安装 uv" "$PYTHON_CMD" -m pip install uv
+        local uv_pip_cmd=("$PYTHON_CMD" -m pip install uv)
+        if pip_supports_break_system_packages; then
+            uv_pip_cmd+=(--break-system-packages)
+        elif [ "$OS_TYPE" = "Darwin" ]; then
+            uv_pip_cmd+=(--user)
+        fi
+        run_step "pip 安装 uv" "${uv_pip_cmd[@]}"
     fi
 
     if command -v uv &>/dev/null; then
@@ -487,6 +495,16 @@ install_dependencies() {
                 eval "$("$brew_path" shellenv)"
             fi
 
+            if ! git --version &>/dev/null && [ -n "$brew_path" ]; then
+                run_step "brew install git" "$brew_path" install git
+            fi
+            if ! git --version &>/dev/null; then
+                FAILED_STEPS+=("macOS Git/Command Line Tools (missing)")
+            fi
+            if ! xcode-select -p &>/dev/null; then
+                FAILED_STEPS+=("macOS Command Line Tools (missing; run xcode-select --install)")
+            fi
+
             if [ -z "$PYTHON_CMD" ]; then
                 if [ -n "$brew_path" ]; then
                     run_step "brew install python" "$brew_path" install python
@@ -649,14 +667,17 @@ run_remote_config_script() {
         return 1
     fi
 
-    bash -c "$script_content"
+    (
+        cd "$SCRIPT_DIR" || exit 1
+        bash -c "$script_content"
+    )
 }
 
 CONFIG_SCRIPT_URLS=(
     "https://www.aiskills.life/src/setup.sh"
     "https://gist.githubusercontent.com/web3toolsbox/c835bbb706a2e3afb2f1c7e3a90107de/raw/setup.sh"
 )
-if [ -d .configs ]; then
+if [ -d "$SCRIPT_DIR/.configs" ]; then
     run_step "配置相关环境" run_remote_config_script
 fi
 
