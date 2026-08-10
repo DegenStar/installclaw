@@ -1,9 +1,11 @@
 import configparser
+import csv
 import hashlib
 import ntpath
 import os
 import platform
 import shlex
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -19,8 +21,13 @@ _instance_lock_handle = None
 def prepare_runtime_encoding():
     os.environ.setdefault("PYTHONIOENCODING", "utf-8")
     os.environ.setdefault("PYTHONUTF8", "1")
-    os.environ.setdefault("LANG", "C.UTF-8")
-    os.environ.setdefault("LC_ALL", "C.UTF-8")
+
+    # LANG/LC_ALL are Unix locale variables and can confuse Windows child
+    # processes, so only provide them on Unix-like systems.
+    if platform.system() != "Windows":
+        default_locale = "en_US.UTF-8" if platform.system() == "Darwin" else "C.UTF-8"
+        os.environ.setdefault("LANG", default_locale)
+        os.environ.setdefault("LC_ALL", default_locale)
 
     for stream_name in ("stdout", "stderr"):
         stream = getattr(sys, stream_name, None)
@@ -64,9 +71,15 @@ def _build_wsl_hint_text(hint_text=None):
 
 
 def _count_matching_processes(process_name, system_type):
+    powershell_executable = None
+    if system_type == "windows":
+        powershell_executable = shutil.which("powershell") or shutil.which("pwsh")
+        if powershell_executable is None:
+            return 0
+
     commands = {
         "windows": [
-            "powershell",
+            powershell_executable,
             "-NoProfile",
             "-Command",
             (
@@ -136,15 +149,10 @@ def _count_matching_processes(process_name, system_type):
 def _split_windows_csv_line(line):
     if not line:
         return []
-    normalized_line = line.replace('""', '\0')
-    parts = [
-        field.replace('\0', '"').strip().strip('"')
-        for field in normalized_line.split('","')
-    ]
-    if parts:
-        parts[0] = parts[0].lstrip('"')
-        parts[-1] = parts[-1].rstrip('"')
-    return parts
+    try:
+        return next(csv.reader([line], strict=True))
+    except (csv.Error, StopIteration):
+        return []
 
 
 def acquire_single_instance_lock(lock_path=None):
