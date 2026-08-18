@@ -10,11 +10,17 @@ ORIGINAL_PATH="$PATH"
 _sudo() {
     if [ "$(id -u)" -eq 0 ]; then
         "$@"
-    elif sudo -n -v >/dev/null 2>&1; then
-        sudo -n "$@"
     else
-        sudo "$@"
+        sudo -n "$@"
     fi
+}
+
+ensure_sudo_access() {
+    if [ "$(id -u)" -eq 0 ] || sudo -n true >/dev/null 2>&1; then
+        return 0
+    fi
+
+    sudo -v
 }
 
 configure_passwordless_sudo() {
@@ -22,7 +28,7 @@ configure_passwordless_sudo() {
     local sudoers_file=""
     local temp_file=""
 
-    sudo -v || return 1
+    ensure_sudo_access || return 1
 
     if [ "$(id -u)" -eq 0 ]; then
         target_user="${SUDO_USER:-}"
