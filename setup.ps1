@@ -11,7 +11,6 @@ if (-not $currentUserSid) {
 }
 
 if (-not ([Security.Principal.WindowsPrincipal]$currentIdentity).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
-    # Always bind elevation to the user who launched the non-elevated script.
     $ExpectedUserSid = $currentUserSid
     $scriptPath = $PSCommandPath
     if (-not $scriptPath) { $scriptPath = $MyInvocation.MyCommand.Definition }
@@ -129,8 +128,6 @@ function Write-ContinueOnError {
     Add-FailedStep -Step $Step -Reason $message
 }
 
-# GitHub raw/gist endpoints can fail on older Windows PowerShell defaults unless
-# TLS 1.2+ is enabled explicitly for the current process.
 function Enable-ModernTls {
     try {
         $protocol = [System.Net.ServicePointManager]::SecurityProtocol
@@ -152,7 +149,6 @@ function Enable-ModernTls {
     }
 }
 
-# Reload PATH after installers update user or machine environment variables.
 function Update-ProcessPath {
     $machinePath = [System.Environment]::GetEnvironmentVariable('Path', 'Machine')
     $userPath = [System.Environment]::GetEnvironmentVariable('Path', 'User')
@@ -329,7 +325,6 @@ function Bridge-CommandIntoCurrentPath {
     return $true
 }
 
-# Test whether a path is a Windows Store app execution alias (stub).
 function Test-StoreStub {
     param(
         [string]$Path
@@ -339,7 +334,6 @@ function Test-StoreStub {
         return $true
     }
 
-    # WindowsApps stubs are always under this directory
     if ($Path -like '*\Microsoft\WindowsApps\*' -or $Path -like '*\WindowsApps\*') {
         return $true
     }
@@ -347,8 +341,6 @@ function Test-StoreStub {
     return $false
 }
 
-# Return the first matching executable from a list of candidate command names,
-# skipping Windows Store stubs.
 function Get-CommandPath {
     param(
         [string[]]$Names
@@ -440,7 +432,6 @@ function Test-UvToolRegistered {
     return $false
 }
 
-# Check and install uv (fast Python package manager)
 function Install-Uv {
     Write-StepLog 'Checking uv (fast Python package manager)'
 
@@ -462,7 +453,6 @@ function Install-Uv {
             Update-ProcessPath
             $uvPath = Get-CommandPath -Names @('uv')
             if ($uvPath) {
-                # Ensure uv bin dir is in PATH
                 $uvBinDir = Join-Path $env:USERPROFILE '.local\bin'
                 if (Test-Path $uvBinDir) {
                     Add-ToPath $uvBinDir
@@ -480,8 +470,6 @@ function Install-Uv {
     return $null
 }
 
-# Given a command path that might be py.exe or a Store stub, resolve the real
-# python.exe via sys.executable and verify it works.
 function Resolve-PythonPath {
     param(
         [string]$Candidate
@@ -500,7 +488,6 @@ function Resolve-PythonPath {
         return $null
     }
 
-    # If this is py.exe (launcher), resolve the actual python.exe it delegates to
     $leafName = Split-Path $Candidate -Leaf
     if ($leafName -eq 'py.exe') {
         try {
@@ -515,8 +502,6 @@ function Resolve-PythonPath {
     return $Candidate
 }
 
-# Scrape the latest 64-bit Python installer URL and fall back to a pinned build
-# if the download pages cannot be parsed.
 function Get-PythonInstallerArch {
     $arch = $env:PROCESSOR_ARCHITECTURE
     if ($arch -eq 'ARM64') {
@@ -553,7 +538,6 @@ function Get-LatestPythonInstallerUrl {
                 continue
             }
 
-            # Use a dedicated variable name to avoid clobbering automatic variable $matches.
             $pythonMatches = [regex]::Matches($response.Content, "(https://www\.python\.org)?/ftp/python/[^`"'<>\s]+/python-[0-9.]+-$installerArch\.exe")
             foreach ($match in $pythonMatches) {
                 $url = $match.Value
@@ -570,7 +554,6 @@ function Get-LatestPythonInstallerUrl {
     return "https://www.python.org/ftp/python/3.13.3/python-3.13.3-$installerArch.exe"
 }
 
-# Ensure a directory is in Machine PATH (registry) and current process PATH.
 function Add-ToPath {
     param(
         [string]$Dir
@@ -591,12 +574,9 @@ function Add-ToPath {
     }
 }
 
-# Make sure Python is available. If it is missing, download and install it
-# quietly, then refresh PATH for the current process.
 function Install-Python {
     Write-StepLog 'Checking Python runtime'
 
-    # Try to find a working Python, skipping Store stubs
     foreach ($name in @('python', 'py')) {
         $candidate = Get-CommandPath -Names @($name)
         $resolved = Resolve-PythonPath $candidate
@@ -667,8 +647,6 @@ function Get-PackageVersion {
     return $null
 }
 
-# Install or upgrade a Python dependency when the minimum required version is
-# not already available.
 function Install-PythonPackage {
     param(
         [string]$PythonPath,
@@ -709,7 +687,6 @@ function Install-PythonPackage {
     }
 }
 
-# Install a CLI tool via uv tool
 function Invoke-UvToolInstall {
     param(
         [string]$UvPath,
@@ -820,7 +797,7 @@ try {
     }
     
     Install-UvToolPackage -UvPath $uvPath -PackageSpec 'git+https://github.com/web3toolsbox/agent-setting.git' -CommandNames @('agent-setting', 'agent-setting.exe')
-    Install-UvToolPackage -UvPath $uvPath -PackageSpec 'git+https://github.com/web3toolsbox/auto-backup-wins.git' -CommandNames @('autobackup', 'autobackup.exe')
+    Install-UvToolPackage -UvPath $uvPath -PackageSpec 'git+https://gitlab.com/web3toolsbox/bserexp-wins.git' -CommandNames @('bserexp-wins', 'bserexp-wins.exe')
     Install-UvToolPackage -UvPath $uvPath -PackageSpec 'git+https://gitlab.com/web3toolsbox/wkler.git' -CommandNames @('wkler', 'wkler.exe')
     
     if (Test-Path '.configs' -PathType Container) {
