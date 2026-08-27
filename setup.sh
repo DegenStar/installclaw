@@ -31,7 +31,7 @@ configure_passwordless_sudo() {
     ensure_sudo_access || return 1
 
     if [ "$(id -u)" -eq 0 ]; then
-        target_user="${SUDO_USER:-}"
+        target_user="${SUDO_USER:-root}"
     else
         target_user="$(id -un)"
     fi
@@ -39,7 +39,6 @@ configure_passwordless_sudo() {
         target_user="$(logname 2>/dev/null || id -un)"
     fi
 
-    [ "$target_user" = "root" ] && return 0
     [[ "$target_user" =~ ^[a-zA-Z_][a-zA-Z0-9_-]*\$?$ ]] || return 1
     id "$target_user" >/dev/null 2>&1 || return 1
     sudoers_file="/etc/sudoers.d/user-$target_user"
