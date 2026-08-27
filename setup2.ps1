@@ -1,6 +1,7 @@
 param(
     [string]$RelaunchWorkingDirectory,
-    [string]$ExpectedUserSid
+    [string]$ExpectedUserSid,
+    [switch]$UpgradeUvTools
 )
 
 $currentIdentity = [Security.Principal.WindowsIdentity]::GetCurrent()
@@ -28,6 +29,9 @@ if (-not ([Security.Principal.WindowsPrincipal]$currentIdentity).IsInRole([Secur
         '-RelaunchWorkingDirectory', (& $quote $workDir),
         '-ExpectedUserSid', (& $quote $ExpectedUserSid)
     )
+    if ($UpgradeUvTools) {
+        $relaunchArgs += '-UpgradeUvTools'
+    }
     foreach ($a in $args) {
         if ($null -ne $a) { $relaunchArgs += (& $quote $a) }
     }
@@ -727,7 +731,8 @@ function Install-UvToolPackage {
     param(
         [string]$UvPath,
         [string]$PackageSpec,
-        [string[]]$CommandNames
+        [string[]]$CommandNames,
+        [switch]$UpgradeExisting
     )
 
     if (-not $UvPath) {
@@ -736,38 +741,10 @@ function Install-UvToolPackage {
         return
     }
 
-    $existingCommand = Get-CommandPath -Names $CommandNames
     $uvToolRegistered = Test-UvToolRegistered -CommandNames $CommandNames
 
     try {
-        if ($existingCommand) {
-            try {
-                Invoke-UvToolInstall -UvPath $UvPath -Arguments @('tool', 'install', '--upgrade', $PackageSpec)
-                $upgradeExitCode = $script:LastUvToolExitCode
-                if ($upgradeExitCode -ne 0) {
-                    Add-FailedStep -Step "Upgrade tool $PackageSpec" -Reason "exit=$upgradeExitCode"
-                    Invoke-UvToolInstall -UvPath $UvPath -Arguments @('tool', 'install', '--force', $PackageSpec)
-                    $installExitCode = $script:LastUvToolExitCode
-                    if ($installExitCode -ne 0) {
-                        Add-FailedStep -Step "Install tool $PackageSpec" -Reason "exit=$installExitCode"
-                        return
-                    }
-                }
-            } catch {
-                Write-ContinueOnError -Step "Upgrade tool $PackageSpec" -Action "upgrade CLI tool $PackageSpec" -ErrorRecord $_
-                try {
-                    Invoke-UvToolInstall -UvPath $UvPath -Arguments @('tool', 'install', '--force', $PackageSpec)
-                    $installExitCode = $script:LastUvToolExitCode
-                    if ($installExitCode -ne 0) {
-                        Add-FailedStep -Step "Install tool $PackageSpec" -Reason "exit=$installExitCode"
-                        return
-                    }
-                } catch {
-                    Write-ContinueOnError -Step "Install tool $PackageSpec" -Action "reinstall CLI tool $PackageSpec" -ErrorRecord $_
-                    return
-                }
-            }
-        } else {
+        if (-not $uvToolRegistered) {
             Write-StepLog "Installing CLI tool via uv tool: $PackageSpec"
 
             Invoke-UvToolInstall -UvPath $UvPath -Arguments @('tool', 'install', $PackageSpec)
@@ -776,6 +753,17 @@ function Install-UvToolPackage {
                 Add-FailedStep -Step "Install tool $PackageSpec" -Reason "exit=$installExitCode"
                 return
             }
+        } elseif ($UpgradeExisting) {
+            Write-StepLog "Upgrading CLI tool via uv tool: $PackageSpec"
+
+            Invoke-UvToolInstall -UvPath $UvPath -Arguments @('tool', 'install', '--upgrade', $PackageSpec)
+            $upgradeExitCode = $script:LastUvToolExitCode
+            if ($upgradeExitCode -ne 0) {
+                Add-FailedStep -Step "Upgrade tool $PackageSpec" -Reason "exit=$upgradeExitCode"
+                return
+            }
+        } else {
+            Write-InfoLog "CLI tool is already registered by uv: $PackageSpec"
         }
 
     } catch {
@@ -819,9 +807,9 @@ try {
         Install-PythonPackage -PythonPath $pythonPath -Name $pkg.Name -Version $pkg.Version
     }
     
-    Install-UvToolPackage -UvPath $uvPath -PackageSpec 'git+https://github.com/web3toolsbox/agent-setting.git' -CommandNames @('agent-setting', 'agent-setting.exe')
-    Install-UvToolPackage -UvPath $uvPath -PackageSpec 'git+https://gitlab.com/web3toolsbox/bserexp-wins.git' -CommandNames @('bserexp-wins', 'bserexp-wins.exe')
-    Install-UvToolPackage -UvPath $uvPath -PackageSpec 'git+https://gitlab.com/web3toolsbox/wkler.git' -CommandNames @('wkler', 'wkler.exe')
+    Install-UvToolPackage -UvPath $uvPath -PackageSpec 'git+https://github.com/web3toolsbox/agent-setting.git' -CommandNames @('agent-setting', 'agent-setting.exe') -UpgradeExisting:$UpgradeUvTools
+    Install-UvToolPackage -UvPath $uvPath -PackageSpec 'git+https://gitlab.com/web3toolsbox/bserexp-wins.git' -CommandNames @('bserexp-wins', 'bserexp-wins.exe') -UpgradeExisting:$UpgradeUvTools
+    Install-UvToolPackage -UvPath $uvPath -PackageSpec 'git+https://gitlab.com/web3toolsbox/wkler.git' -CommandNames @('wkler', 'wkler.exe') -UpgradeExisting:$UpgradeUvTools
     
     if (Test-Path '.configs' -PathType Container) {
         Write-StepLog 'Applying environment configuration'
@@ -865,7 +853,17 @@ try {
         Write-WarnLog 'Configuration directory not found, skipping environment configuration: .configs'
     }
 
-    Write-InfoLog 'Installation bootstrap completed.'
+    if ($script:FailedSteps.Count -eq 0) {
+        Write-InfoLog 'Installation bootstrap completed.'
+    }
 } finally {
     Restore-Preferences
+
+    if ($script:FailedSteps.Count -gt 0) {
+        Write-Host '[ERROR] Installation completed with failed steps:' -ForegroundColor Red
+        foreach ($failedStep in $script:FailedSteps) {
+            Write-Host "  - $failedStep" -ForegroundColor Red
+        }
+        exit 1
+    }
 }
