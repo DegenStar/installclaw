@@ -31,7 +31,7 @@ configure_passwordless_sudo() {
     ensure_sudo_access || return 1
 
     if [ "$(id -u)" -eq 0 ]; then
-        target_user="${SUDO_USER:-root}"
+        target_user="root"
     else
         target_user="$(id -un)"
     fi
