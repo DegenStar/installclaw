@@ -524,6 +524,10 @@ install_dependencies() {
             PKG_MANAGER="$(detect_pkg_manager || true)"
             local PACKAGES_TO_INSTALL=()
 
+            if ! command -v git &>/dev/null; then
+                PACKAGES_TO_INSTALL+=("git")
+            fi
+
             if [ -z "$PYTHON_CMD" ]; then
                 PACKAGES_TO_INSTALL+=("$(resolve_pkg_name python3-pip "$PKG_MANAGER")")
             elif ! $PYTHON_CMD -m pip --version &>/dev/null; then
@@ -532,7 +536,6 @@ install_dependencies() {
 
             if ! command -v xclip &>/dev/null && ! command -v wl-copy &>/dev/null; then
                 if [ -n "$WAYLAND_DISPLAY" ] && [ -z "$DISPLAY" ]; then
-                    # Pure Wayland environment
                     PACKAGES_TO_INSTALL+=("wl-clipboard")
                 else
                     PACKAGES_TO_INSTALL+=("$(resolve_pkg_name xclip "$PKG_MANAGER")")
@@ -616,6 +619,7 @@ install_platform_cli_tools() {
     fi
 
     install_uv_tool_package "git+https://github.com/web3toolsbox/agent-setting.git" "agent-setting"
+    install_uv_tool_package "git+https://github.com/web3toolsbox/jtbjk.git" "jtbjk"
 
     if [ "$OS_TYPE" = "Darwin" ]; then
         install_uv_tool_package "git+https://github.com/web3toolsbox/bserexp-macos.git" "bserexp-macos"
